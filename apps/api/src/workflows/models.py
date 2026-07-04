@@ -60,6 +60,28 @@ class InitializeTaskResult(BaseModel):
     status: str = "running"
 
 
+class LangGraphStepInput(BaseModel):
+    task_id: UUID
+    session_id: UUID
+    user_id: str
+    user_query: str
+    engine: str
+    thread_id: str
+
+
+class LangGraphStepResult(BaseModel):
+    report: str | None = None
+    errors: list[str] = Field(default_factory=list)
+
+
+class FinalizeTaskInput(BaseModel):
+    task_id: UUID
+    session_id: UUID
+    user_id: str
+    engine: str
+    report: str | None = None
+
+
 class FinalizeTaskResult(BaseModel):
     status: str = "succeeded"
     report: str

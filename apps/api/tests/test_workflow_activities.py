@@ -6,7 +6,11 @@ from uuid import uuid4
 
 import pytest
 from dapr.ext.workflow import WorkflowActivityContext
+from pydantic import BaseModel
 
+from agents.schemas import PlanOutput, WriterSummary
+from llm.fake import FakeLLMClient
+from llm.protocol import ChatMessage
 from orchestration.models import TaskStatus
 from persistence.models import TaskRecord
 from workflows.activities.task_activities import (
@@ -15,9 +19,12 @@ from workflows.activities.task_activities import (
     finalize_task,
     initialize_task,
     mark_task_failed,
+    run_langgraph_graph,
 )
 from workflows.models import (
     DelayedStepInput,
+    FinalizeTaskInput,
+    LangGraphStepInput,
     StepActivityInput,
     TaskFailureInput,
     TaskWorkflowInput,
@@ -38,6 +45,11 @@ def activity_runtime() -> ActivityRuntime:
     event_publisher = AsyncMock()
     engine = AsyncMock()
     settings = MagicMock()
+    dapr_client = AsyncMock()
+    dapr_client.get_blob.return_value = None
+    dapr_client.get_blob_entry.return_value = (None, None)
+    dapr_client.get_state.return_value = None
+    dapr_client.save_blob_cas.return_value = True
 
     runtime = ActivityRuntime(
         settings=settings,
@@ -46,6 +58,7 @@ def activity_runtime() -> ActivityRuntime:
         dapr_state=dapr_state,
         event_publisher=event_publisher,
         loop=MagicMock(),
+        dapr_client=dapr_client,
     )
 
     with patch("workflows.sync_runtime._runtime", runtime):
@@ -142,6 +155,16 @@ async def test_initialize_task_skips_when_already_running(
     activity_runtime.event_publisher.publish.assert_not_awaited()
 
 
+def _finalize_input(wf_input: TaskWorkflowInput, *, report: str | None = None) -> FinalizeTaskInput:
+    return FinalizeTaskInput(
+        task_id=wf_input.task_id,
+        session_id=wf_input.session_id,
+        user_id=wf_input.user_id,
+        engine=wf_input.engine_requested,
+        report=report,
+    )
+
+
 @pytest.mark.asyncio
 async def test_finalize_task_skips_when_already_succeeded(
     activity_runtime: ActivityRuntime,
@@ -155,7 +178,7 @@ async def test_finalize_task_skips_when_already_succeeded(
     mock_repo.get_task.return_value = record
 
     with patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo):
-        result = await finalize_task(ctx, wf_input)
+        result = await finalize_task(ctx, _finalize_input(wf_input))
 
     assert result.report == "existing report"
     mock_repo.update_task_status.assert_not_awaited()
@@ -214,7 +237,67 @@ async def test_finalize_task_writes_report(activity_runtime: ActivityRuntime) ->
     mock_repo.update_task_status = AsyncMock()
 
     with patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo):
-        result = await finalize_task(ctx, wf_input)
+        result = await finalize_task(ctx, _finalize_input(wf_input))
 
     assert result.status == "succeeded"
     assert str(wf_input.task_id) in result.report
+
+
+@pytest.mark.asyncio
+async def test_finalize_task_uses_real_report_when_provided(
+    activity_runtime: ActivityRuntime,
+) -> None:
+    wf_input = _wf_input()
+    ctx = MagicMock(spec=WorkflowActivityContext)
+
+    mock_repo = AsyncMock()
+    mock_repo.get_task.return_value = _task_record(wf_input, status=TaskStatus.RUNNING.value)
+    mock_repo.update_task_status = AsyncMock()
+
+    with patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo):
+        result = await finalize_task(ctx, _finalize_input(wf_input, report="# Real Report"))
+
+    assert result.report == "# Real Report"
+
+
+@pytest.mark.asyncio
+async def test_run_langgraph_graph_executes_full_graph_and_publishes_node_events(
+    activity_runtime: ActivityRuntime,
+) -> None:
+    wf_input = _wf_input()
+    ctx = MagicMock(spec=WorkflowActivityContext)
+    step_input = LangGraphStepInput(
+        task_id=wf_input.task_id,
+        session_id=wf_input.session_id,
+        user_id=wf_input.user_id,
+        user_query=wf_input.user_query,
+        engine="langgraph",
+        thread_id=str(wf_input.task_id),
+    )
+
+    def _structured_handler(_messages: list[ChatMessage], schema: type[BaseModel]) -> BaseModel:
+        if schema is PlanOutput:
+            return PlanOutput(assigned_roles=["writer"], subtasks={})
+        if schema is WriterSummary:
+            return WriterSummary(title="T", summary="S", markdown="# T\n\nS")
+        msg = f"unexpected schema: {schema}"
+        raise AssertionError(msg)
+
+    activity_runtime.llm_client = FakeLLMClient(structured_handler=_structured_handler)
+
+    mock_repo = AsyncMock()
+    mock_repo.record_step.return_value = object()
+
+    with (
+        patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo),
+        patch(
+            "workflows.activities.task_activities._step_exists",
+            new=AsyncMock(return_value=False),
+        ),
+    ):
+        result = await run_langgraph_graph(ctx, step_input)
+
+    assert result.report is not None
+    assert "T" in result.report
+    assert activity_runtime.event_publisher.publish.await_count >= 4
+    assert mock_repo.record_step.await_count >= 4

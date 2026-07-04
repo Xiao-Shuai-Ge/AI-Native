@@ -16,6 +16,7 @@ from workflows.activities.task_activities import (
     finalize_task,
     initialize_task,
     mark_task_failed,
+    run_langgraph_graph,
 )
 from workflows.sync_runtime import init_activity_runtime, shutdown_activity_runtime_sync
 from workflows.task_workflow import task_orchestration
@@ -39,6 +40,7 @@ def build_workflow_runtime() -> WorkflowRuntime:
     runtime.register_activity(delayed_step)
     runtime.register_activity(finalize_task)
     runtime.register_activity(mark_task_failed)
+    runtime.register_activity(run_langgraph_graph)
     return runtime
 
 

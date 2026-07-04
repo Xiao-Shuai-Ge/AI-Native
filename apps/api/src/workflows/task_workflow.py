@@ -8,17 +8,20 @@ from typing import Any
 
 from dapr.ext.workflow import DaprWorkflowContext
 
+from orchestration.models import EngineChoice
 from workflows.activities.task_activities import (
     delayed_step,
     execute_step,
     finalize_task,
     initialize_task,
     mark_task_failed,
+    run_langgraph_graph,
 )
 from workflows.constraints import (
     EXECUTE_STEP_RETRY,
     FINALIZE_RETRY,
     INITIALIZE_RETRY,
+    LANGGRAPH_STEP_RETRY,
     MARK_FAILED_RETRY,
     delayed_step_retry,
 )
@@ -26,6 +29,8 @@ from workflows.models import (
     STUB_STEPS,
     TASK_WORKFLOW_NAME,
     DelayedStepInput,
+    FinalizeTaskInput,
+    LangGraphStepInput,
     StepActivityInput,
     TaskFailureInput,
     TaskWorkflowInput,
@@ -46,19 +51,39 @@ def task_orchestration(
             retry_policy=INITIALIZE_RETRY,
         )
 
-        for step_name in STUB_STEPS:
-            step_input = StepActivityInput(
+        report: str | None = None
+
+        if wf_input.engine_requested == EngineChoice.LANGGRAPH.value:
+            langgraph_input = LangGraphStepInput(
                 task_id=wf_input.task_id,
                 session_id=wf_input.session_id,
                 user_id=wf_input.user_id,
+                user_query=wf_input.user_query,
                 engine=wf_input.engine_requested,
-                step_name=step_name,
+                thread_id=wf_input.thread_id,
             )
-            yield ctx.call_activity(
-                execute_step,
-                input=step_input,
-                retry_policy=EXECUTE_STEP_RETRY,
+            langgraph_result = yield ctx.call_activity(
+                run_langgraph_graph,
+                input=langgraph_input,
+                retry_policy=LANGGRAPH_STEP_RETRY,
             )
+            report = langgraph_result.report
+        else:
+            # `auto`/`crewai` engines are not yet implemented; keep the stub
+            # step sequence so Day 1-4 behavior and tests stay unaffected.
+            for step_name in STUB_STEPS:
+                step_input = StepActivityInput(
+                    task_id=wf_input.task_id,
+                    session_id=wf_input.session_id,
+                    user_id=wf_input.user_id,
+                    engine=wf_input.engine_requested,
+                    step_name=step_name,
+                )
+                yield ctx.call_activity(
+                    execute_step,
+                    input=step_input,
+                    retry_policy=EXECUTE_STEP_RETRY,
+                )
 
         if wf_input.delay_seconds > 0:
             delay_input = DelayedStepInput(
@@ -74,9 +99,16 @@ def task_orchestration(
                 retry_policy=delayed_step_retry(wf_input.delay_seconds),
             )
 
+        finalize_input = FinalizeTaskInput(
+            task_id=wf_input.task_id,
+            session_id=wf_input.session_id,
+            user_id=wf_input.user_id,
+            engine=wf_input.engine_requested,
+            report=report,
+        )
         yield ctx.call_activity(
             finalize_task,
-            input=wf_input,
+            input=finalize_input,
             retry_policy=FINALIZE_RETRY,
         )
     except Exception as exc:

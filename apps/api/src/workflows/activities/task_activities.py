@@ -11,7 +11,9 @@ from dapr.ext.workflow import WorkflowActivityContext
 from sqlalchemy import select
 
 from events.schemas import AgentTaskEvent
-from orchestration.models import EngineChoice, TaskStatus
+from orchestration.langgraph_engine.engine import LangGraphEngine
+from orchestration.models import EngineChoice, TaskRequest, TaskState, TaskStatus
+from persistence.checkpointer import DaprCheckpointSaver
 from persistence.idempotency import step_idempotency_key
 from persistence.models import TaskStepRecord
 from persistence.repository import TaskRepository
@@ -24,13 +26,16 @@ from workflows.models import (
     ActivityStepResult,
     DelayedStepInput,
     DelayedStepResult,
+    FinalizeTaskInput,
     FinalizeTaskResult,
     InitializeTaskResult,
+    LangGraphStepInput,
+    LangGraphStepResult,
     StepActivityInput,
     TaskFailureInput,
     TaskWorkflowInput,
 )
-from workflows.sync_runtime import get_activity_runtime
+from workflows.sync_runtime import get_activity_llm_client, get_activity_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +186,91 @@ async def execute_step(
     return await asyncio.wait_for(_execute_step_impl(step_input), timeout=timeout)
 
 
+async def _record_langgraph_node(task_id: UUID, step_name: str, status: str) -> None:
+    runtime = get_activity_runtime()
+    idempotency_key = step_idempotency_key(task_id, step_name, "langgraph")
+    if await _step_exists(task_id, idempotency_key):
+        return
+    try:
+        async with runtime.session_factory() as session:
+            repo = TaskRepository(session)
+            await repo.record_step(
+                task_id=task_id,
+                step_name=step_name,
+                status=status,
+                output_json={"detail": f"langgraph node {step_name} {status}"},
+                idempotency_key=idempotency_key,
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "failed to record langgraph node step",
+            extra={"task_id": str(task_id), "step": step_name, "error": str(exc)},
+        )
+
+
+async def _run_langgraph_graph_impl(step_input: LangGraphStepInput) -> LangGraphStepResult:
+    runtime = get_activity_runtime()
+    task_id = step_input.task_id
+
+    async def on_node_complete(step_name: str, status: str, _state: TaskState) -> None:
+        await _publish_event(
+            task_id=task_id,
+            engine=step_input.engine,
+            step=step_name,
+            status=status,
+            detail=f"langgraph node {step_name} {status}",
+        )
+        await _record_langgraph_node(task_id, step_name, status)
+        await _update_runtime_state(task_id, TaskStatus.RUNNING, current_step=step_name)
+
+    async def persist_result(state: TaskState) -> None:
+        await _update_runtime_state(
+            task_id,
+            TaskStatus.RUNNING,
+            current_step="persist_result",
+            report=state.report,
+        )
+
+    if runtime.dapr_client is None:
+        msg = "activity runtime is missing a dapr_client for LangGraph checkpointing"
+        raise RuntimeError(msg)
+
+    checkpointer = DaprCheckpointSaver(runtime.dapr_client)
+    llm = runtime.llm_client or get_activity_llm_client()
+    engine = LangGraphEngine(
+        llm=llm,
+        checkpointer=checkpointer,
+        on_node_complete=on_node_complete,
+        persist_result=persist_result,
+    )
+
+    existing_checkpoint = await checkpointer.aget_tuple(
+        {"configurable": {"thread_id": step_input.thread_id}}
+    )
+    if existing_checkpoint is not None:
+        result = await engine.resume(step_input.thread_id)
+    else:
+        request = TaskRequest(
+            task_id=task_id,
+            session_id=step_input.session_id,
+            user_id=step_input.user_id,
+            user_query=step_input.user_query,
+            engine=EngineChoice(step_input.engine),
+        )
+        result = await engine.run(request)
+
+    return LangGraphStepResult(report=result.report, errors=result.errors)
+
+
+async def run_langgraph_graph(
+    _ctx: WorkflowActivityContext,
+    step_input: LangGraphStepInput,
+) -> LangGraphStepResult:
+    timeout = ACTIVITY_TIMEOUTS["run_langgraph_graph"].total_seconds()
+    return await asyncio.wait_for(_run_langgraph_graph_impl(step_input), timeout=timeout)
+
+
 async def _delayed_step_impl(step_input: DelayedStepInput) -> DelayedStepResult:
     task_id = step_input.task_id
     idempotency_key = step_idempotency_key(task_id, DELAYED_PROBE_STEP)
@@ -229,11 +319,11 @@ async def delayed_step(
     return await asyncio.wait_for(_delayed_step_impl(step_input), timeout=timeout)
 
 
-async def _finalize_task_impl(wf_input: TaskWorkflowInput) -> FinalizeTaskResult:
+async def _finalize_task_impl(finalize_input: FinalizeTaskInput) -> FinalizeTaskResult:
     runtime = get_activity_runtime()
-    task_id = wf_input.task_id
-    engine = wf_input.engine_requested
-    report = f"Stub report for task {task_id}"
+    task_id = finalize_input.task_id
+    engine = finalize_input.engine
+    report = finalize_input.report or f"Stub report for task {task_id}"
 
     async with runtime.session_factory() as session:
         repo = TaskRepository(session)
@@ -270,10 +360,10 @@ async def _finalize_task_impl(wf_input: TaskWorkflowInput) -> FinalizeTaskResult
 
 async def finalize_task(
     _ctx: WorkflowActivityContext,
-    wf_input: TaskWorkflowInput,
+    finalize_input: FinalizeTaskInput,
 ) -> FinalizeTaskResult:
     timeout = ACTIVITY_TIMEOUTS["finalize_task"].total_seconds()
-    return await asyncio.wait_for(_finalize_task_impl(wf_input), timeout=timeout)
+    return await asyncio.wait_for(_finalize_task_impl(finalize_input), timeout=timeout)
 
 
 async def _mark_task_failed_impl(failure_input: TaskFailureInput) -> dict[str, str]:

@@ -63,19 +63,36 @@ class DaprHttpClient:
         response.raise_for_status()
 
     async def save_blob(self, key: str, data: bytes) -> None:
-        payload = [{"key": key, "value": data.decode("utf-8")}]
-        response = await self._client.post(
-            f"/v1.0/state/{self._state_store}",
-            json=payload,
-        )
-        response.raise_for_status()
+        saved = await self.save_blob_cas(key, data, etag=None)
+        if not saved:
+            msg = f"unexpected CAS failure creating blob key={key}"
+            raise RuntimeError(msg)
 
     async def get_blob(self, key: str) -> bytes | None:
+        data, _etag = await self.get_blob_entry(key)
+        return data
+
+    async def get_blob_entry(self, key: str) -> tuple[bytes | None, str | None]:
         response = await self._client.get(f"/v1.0/state/{self._state_store}/{key}")
         if response.status_code == 404:
-            return None
+            return None, None
         response.raise_for_status()
         if not response.content:
-            return None
-        text = response.text
-        return text.encode("utf-8")
+            return None, None
+        etag = response.headers.get("etag")
+        return response.text.encode("utf-8"), etag
+
+    async def save_blob_cas(self, key: str, data: bytes, *, etag: str | None) -> bool:
+        """Persist a blob using Dapr optimistic concurrency when `etag` is set."""
+        item: dict[str, Any] = {"key": key, "value": data.decode("utf-8")}
+        if etag is not None:
+            item["etag"] = etag
+            item["options"] = {"concurrency": "first-write"}
+        response = await self._client.post(
+            f"/v1.0/state/{self._state_store}",
+            json=[item],
+        )
+        if response.status_code == 409:
+            return False
+        response.raise_for_status()
+        return True

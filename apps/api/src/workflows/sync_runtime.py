@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from api.config import Settings, get_settings
 from events.schemas import AgentTaskEventPublisher
+from llm.protocol import LLMClient
 from persistence.dapr_client import DaprHttpClient
 from persistence.dapr_state import DaprStateStore
 from persistence.database import create_engine, create_session_factory
@@ -25,6 +26,8 @@ class ActivityRuntime:
     dapr_state: DaprStateStore
     event_publisher: AgentTaskEventPublisher
     loop: asyncio.AbstractEventLoop
+    dapr_client: DaprHttpClient | None = None
+    llm_client: LLMClient | None = None
 
 
 _runtime: ActivityRuntime | None = None
@@ -49,9 +52,25 @@ def init_activity_runtime(settings: Settings | None = None) -> ActivityRuntime:
         dapr_state=DaprStateStore(dapr_client),
         event_publisher=AgentTaskEventPublisher(dapr_client),
         loop=loop,
+        dapr_client=dapr_client,
     )
     logger.info("activity runtime initialized")
     return _runtime
+
+
+def get_activity_llm_client() -> LLMClient:
+    """Lazily build (and cache) the LLM client used by LangGraph/CrewAI Activities.
+
+    Kept separate from `init_activity_runtime` so tests can inject a
+    `FakeLLMClient` via `runtime.llm_client` without requiring real provider
+    credentials.
+    """
+    from llm.factory import create_llm_client
+
+    runtime = get_activity_runtime()
+    if runtime.llm_client is None:
+        runtime.llm_client = create_llm_client(runtime.settings)
+    return runtime.llm_client
 
 
 def get_activity_runtime() -> ActivityRuntime:

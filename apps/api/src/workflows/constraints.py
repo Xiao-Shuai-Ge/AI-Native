@@ -13,6 +13,7 @@ ACTIVITY_TIMEOUTS: dict[str, timedelta] = {
     "delayed_step_base": timedelta(seconds=60),
     "finalize_task": timedelta(seconds=30),
     "mark_task_failed": timedelta(seconds=30),
+    "run_langgraph_graph": timedelta(seconds=300),
 }
 
 
@@ -29,6 +30,7 @@ INITIALIZE_RETRY = _retry(3)
 EXECUTE_STEP_RETRY = _retry(3)
 FINALIZE_RETRY = _retry(2)
 MARK_FAILED_RETRY = _retry(2)
+LANGGRAPH_STEP_RETRY = _retry(3, first_seconds=5.0)
 
 
 def delayed_step_retry(delay_seconds: float) -> RetryPolicy:

@@ -19,7 +19,15 @@ class WriterAgent:
         *,
         task_id: UUID,
         llm: LLMClient,
+        research_notes: list[str] | None = None,
+        analysis: str | None = None,
     ) -> WriterSummary:
+        user_content = f"Write a Markdown summary for this topic: {topic}"
+        if research_notes:
+            joined_notes = "\n".join(f"- {note}" for note in research_notes)
+            user_content += f"\nResearch notes:\n{joined_notes}"
+        if analysis:
+            user_content += f"\nAnalysis:\n{analysis}"
         messages = [
             ChatMessage(
                 role=ChatRole.SYSTEM,
@@ -27,7 +35,7 @@ class WriterAgent:
             ),
             ChatMessage(
                 role=ChatRole.USER,
-                content=f"Write a Markdown summary for this topic: {topic}",
+                content=user_content,
             ),
         ]
         result = await llm.chat_structured(
