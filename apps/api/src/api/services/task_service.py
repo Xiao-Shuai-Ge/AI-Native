@@ -2,21 +2,31 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from api.services.minimal_runner import MinimalTaskRunner
-from events.schemas import AgentTaskEventPublisher
+from events.schemas import AgentTaskEvent, AgentTaskEventPublisher
 from orchestration.models import TaskRequest, TaskStatus
 from persistence.dapr_state import DaprStateStore
 from persistence.ids import new_task_id, thread_id_for, workflow_id_for
 from persistence.repository import TaskRepository
 from persistence.session_store import SessionStore
+from persistence.state_machine import assert_transition
+from workflows.client import WorkflowScheduler
+from workflows.models import TaskWorkflowInput
 
 logger = logging.getLogger(__name__)
+
+
+class WorkflowScheduleError(RuntimeError):
+    """Raised after task persistence is compensated for a workflow scheduling failure."""
+
+    def __init__(self, task_id: UUID, message: str) -> None:
+        super().__init__(message)
+        self.task_id = task_id
 
 
 class TaskService:
@@ -26,11 +36,16 @@ class TaskService:
         dapr_state: DaprStateStore,
         session_store: SessionStore,
         event_publisher: AgentTaskEventPublisher,
+        workflow_scheduler: WorkflowScheduler,
+        *,
+        default_delay_seconds: float = 0.0,
     ) -> None:
         self._session_factory = session_factory
         self._dapr_state = dapr_state
         self._session_store = session_store
-        self._runner = MinimalTaskRunner(session_factory, dapr_state, event_publisher)
+        self._event_publisher = event_publisher
+        self._workflow_scheduler = workflow_scheduler
+        self._default_delay_seconds = default_delay_seconds
 
     async def create_task(self, request: TaskRequest) -> dict[str, object]:
         task_id = new_task_id(request.task_id)
@@ -38,6 +53,11 @@ class TaskService:
         user_id = request.user_id or "default"
         workflow_id = workflow_id_for(task_id)
         thread_id = thread_id_for(task_id)
+        delay_seconds = (
+            request.delay_seconds
+            if request.delay_seconds is not None
+            else self._default_delay_seconds
+        )
 
         async with self._session_factory() as session:
             repo = TaskRepository(session)
@@ -76,6 +96,7 @@ class TaskService:
             "thread_id": thread_id,
             "session_context": session_context,
             "user_preferences": preferences,
+            "delay_seconds": delay_seconds,
         }
         try:
             await self._dapr_state.save_task_runtime_state(task_id, runtime_snapshot)
@@ -92,7 +113,28 @@ class TaskService:
             content=request.user_query,
         )
 
-        asyncio.create_task(self._runner.run(task_id))
+        wf_input = TaskWorkflowInput(
+            task_id=task_id,
+            session_id=session_id,
+            user_id=user_id,
+            user_query=request.user_query,
+            engine_requested=request.engine.value,
+            workflow_id=workflow_id,
+            thread_id=thread_id,
+            delay_seconds=delay_seconds,
+            user_preferences=preferences,
+            session_context=session_context,
+        )
+        try:
+            await self._workflow_scheduler.schedule_task(wf_input)
+        except Exception as exc:
+            await self._mark_scheduling_failed(
+                task_id,
+                engine=request.engine.value,
+                error=str(exc),
+            )
+            msg = f"failed to schedule workflow for task {task_id}"
+            raise WorkflowScheduleError(task_id, msg) from exc
 
         return {
             "task_id": task_id,
@@ -104,6 +146,157 @@ class TaskService:
             "user_preferences": preferences,
             "session_context": session_context,
         }
+
+    async def _mark_scheduling_failed(self, task_id: UUID, *, engine: str, error: str) -> None:
+        error_summary = error[:500]
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.get_task(task_id)
+            if task is not None:
+                current = TaskStatus(task.status)
+                if current == TaskStatus.QUEUED:
+                    await repo.update_task_status(task_id, TaskStatus.RUNNING)
+                    current = TaskStatus.RUNNING
+                if current == TaskStatus.RUNNING:
+                    await repo.update_task_status(task_id, TaskStatus.FAILED)
+            await session.commit()
+
+        try:
+            await self._dapr_state.merge_task_runtime_state(
+                task_id,
+                {
+                    "status": TaskStatus.FAILED.value,
+                    "current_step": "scheduling_failed",
+                    "error": error_summary,
+                    "updated_at": datetime.now(tz=UTC).isoformat(),
+                },
+            )
+        except Exception as exc:
+            logger.warning(
+                "failed to update dapr runtime state after workflow schedule failure",
+                extra={"task_id": str(task_id), "error": str(exc)},
+            )
+
+        try:
+            await self._event_publisher.publish(
+                AgentTaskEvent(
+                    task_id=task_id,
+                    engine=engine,
+                    step="workflow.schedule",
+                    status=TaskStatus.FAILED.value,
+                    detail=error_summary,
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "failed to publish workflow schedule failure event",
+                extra={"task_id": str(task_id), "error": str(exc)},
+            )
+
+    async def pause_task(self, task_id: UUID) -> dict[str, object]:
+        workflow_id = await self._load_workflow_id_for_transition(task_id, TaskStatus.PAUSED)
+
+        await self._workflow_scheduler.pause_task(workflow_id)
+
+        try:
+            await self._persist_task_status(task_id, TaskStatus.PAUSED)
+        except Exception as exc:
+            try:
+                await self._workflow_scheduler.resume_task(workflow_id)
+            except Exception as compensate_exc:
+                logger.error(
+                    "failed to compensate workflow after pause persistence failure",
+                    extra={
+                        "task_id": str(task_id),
+                        "workflow_id": workflow_id,
+                        "error": str(compensate_exc),
+                    },
+                )
+            msg = f"failed to persist paused status for task {task_id}"
+            raise RuntimeError(msg) from exc
+
+        try:
+            await self._dapr_state.merge_task_runtime_state(
+                task_id,
+                {"status": TaskStatus.PAUSED.value},
+            )
+        except Exception as exc:
+            logger.warning(
+                "failed to update dapr runtime state on pause",
+                extra={"task_id": str(task_id), "error": str(exc)},
+            )
+
+        return {
+            "task_id": task_id,
+            "workflow_id": workflow_id,
+            "status": TaskStatus.PAUSED,
+        }
+
+    async def resume_task(self, task_id: UUID) -> dict[str, object]:
+        workflow_id = await self._load_workflow_id_for_transition(task_id, TaskStatus.RUNNING)
+
+        await self._workflow_scheduler.resume_task(workflow_id)
+
+        try:
+            await self._persist_task_status(task_id, TaskStatus.RUNNING)
+        except Exception as exc:
+            try:
+                await self._workflow_scheduler.pause_task(workflow_id)
+            except Exception as compensate_exc:
+                logger.error(
+                    "failed to compensate workflow after resume persistence failure",
+                    extra={
+                        "task_id": str(task_id),
+                        "workflow_id": workflow_id,
+                        "error": str(compensate_exc),
+                    },
+                )
+            msg = f"failed to persist running status for task {task_id}"
+            raise RuntimeError(msg) from exc
+
+        try:
+            await self._dapr_state.merge_task_runtime_state(
+                task_id,
+                {"status": TaskStatus.RUNNING.value},
+            )
+        except Exception as exc:
+            logger.warning(
+                "failed to update dapr runtime state on resume",
+                extra={"task_id": str(task_id), "error": str(exc)},
+            )
+
+        return {
+            "task_id": task_id,
+            "workflow_id": workflow_id,
+            "status": TaskStatus.RUNNING,
+        }
+
+    async def _load_workflow_id_for_transition(
+        self,
+        task_id: UUID,
+        target: TaskStatus,
+    ) -> str:
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.get_task(task_id)
+            if task is None:
+                msg = "task not found"
+                raise LookupError(msg)
+            current = TaskStatus(task.status)
+            assert_transition(current, target)
+            return task.workflow_id
+
+    async def _persist_task_status(self, task_id: UUID, target: TaskStatus) -> None:
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.get_task(task_id)
+            if task is None:
+                msg = "task not found"
+                raise LookupError(msg)
+            current = TaskStatus(task.status)
+            assert_transition(current, target)
+            await repo.update_task_status(task_id, target)
+            await session.commit()
 
     async def get_task(self, task_id: UUID) -> dict[str, object] | None:
         async with self._session_factory() as session:

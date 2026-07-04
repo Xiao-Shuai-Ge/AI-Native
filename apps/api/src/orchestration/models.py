@@ -38,6 +38,7 @@ class TaskRequest(BaseModel):
     user_id: str | None = None
     user_query: str
     engine: EngineChoice = EngineChoice.AUTO
+    delay_seconds: float | None = None
 
 
 class TaskResult(BaseModel):

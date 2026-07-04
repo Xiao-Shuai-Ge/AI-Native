@@ -1,7 +1,7 @@
 """Initial persistence schema for Day 3."""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0001_initial"
@@ -34,7 +34,11 @@ def upgrade() -> None:
     op.create_table(
         "task_steps",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("task_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tasks.id", ondelete="CASCADE")),
+        sa.Column(
+            "task_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("tasks.id", ondelete="CASCADE"),
+        ),
         sa.Column("step_name", sa.String(length=128), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("output_json", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
@@ -47,7 +51,11 @@ def upgrade() -> None:
     op.create_table(
         "task_messages",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("task_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tasks.id", ondelete="CASCADE")),
+        sa.Column(
+            "task_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("tasks.id", ondelete="CASCADE"),
+        ),
         sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("role", sa.String(length=32), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
@@ -59,8 +67,16 @@ def upgrade() -> None:
     op.create_table(
         "tool_calls",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("task_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tasks.id", ondelete="CASCADE")),
-        sa.Column("step_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("task_steps.id", ondelete="SET NULL")),
+        sa.Column(
+            "task_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("tasks.id", ondelete="CASCADE"),
+        ),
+        sa.Column(
+            "step_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("task_steps.id", ondelete="SET NULL"),
+        ),
         sa.Column("tool_name", sa.String(length=128), nullable=False),
         sa.Column("arguments", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("result_summary", sa.Text(), nullable=True),
@@ -73,7 +89,11 @@ def upgrade() -> None:
     op.create_table(
         "audit_events",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("task_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("tasks.id", ondelete="CASCADE")),
+        sa.Column(
+            "task_id",
+            postgresql.UUID(as_uuid=True),
+            sa.ForeignKey("tasks.id", ondelete="CASCADE"),
+        ),
         sa.Column("engine", sa.String(length=32), nullable=False),
         sa.Column("step", sa.String(length=128), nullable=False),
         sa.Column("status", sa.String(length=32), nullable=False),

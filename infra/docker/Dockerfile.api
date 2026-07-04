@@ -2,6 +2,13 @@ FROM python:3.12-slim-bookworm
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl wget \
+    && wget -q https://raw.githubusercontent.com/dapr/cli/master/install/install.sh -O - | /bin/bash \
+    && apt-get purge -y wget \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml uv.lock ./
@@ -14,8 +21,10 @@ COPY apps/api/src apps/api/src
 COPY apps/api/alembic apps/api/alembic
 COPY apps/api/alembic.ini apps/api/
 COPY infra/docker/docker-entrypoint-api.sh /app/infra/docker/docker-entrypoint-api.sh
+COPY infra/docker/docker-entrypoint-worker.sh /app/infra/docker/docker-entrypoint-worker.sh
 
-RUN chmod +x /app/infra/docker/docker-entrypoint-api.sh
+RUN chmod +x /app/infra/docker/docker-entrypoint-api.sh \
+    && chmod +x /app/infra/docker/docker-entrypoint-worker.sh
 
 ENV PYTHONPATH=/app/apps/api/src
 

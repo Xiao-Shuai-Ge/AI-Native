@@ -16,9 +16,9 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from api.config import get_settings
-from persistence.database import build_async_database_url
-from persistence.models import Base
+from api.config import get_settings  # noqa: E402
+from persistence.database import build_async_database_url  # noqa: E402
+from persistence.models import Base  # noqa: E402
 
 config = context.config
 

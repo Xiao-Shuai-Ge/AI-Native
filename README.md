@@ -1,6 +1,8 @@
 # AI Native 多智能体协作平台
 
-Day 3 交付：任务状态持久化、PostgreSQL 业务存储、Dapr State/Pub/Sub、Redis 会话上下文、任务 CRUD API。
+Day 4 交付：Dapr Workflow 耐久编排、独立 Worker、任务暂停/恢复、Worker 重启恢复演示、DurableAgent smoke test。
+
+Day 3 能力仍保留：PostgreSQL 业务存储、Dapr State/Pub/Sub、Redis 会话上下文、任务 CRUD API。
 
 ## 前置条件
 
@@ -80,6 +82,14 @@ uv run dapr run \
 cd apps/api && uv run dapr run --app-id api --app-port 8000 --dapr-http-port 3500 --components-path ../../dapr/components --config ../../dapr/config/config.yaml -- uv run uvicorn api.main:app --app-dir src --reload --host 0.0.0.0 --port 8000
 ```
 
+**本地 Workflow Worker（与 API 并行运行）**
+
+```bash
+cd apps/api && uv run dapr run --app-id worker --app-port 0 --dapr-http-port 3501 --dapr-grpc-port 50002 --components-path ../../dapr/components --config ../../dapr/config/config.yaml -- uv run python -m workflows.worker_main
+```
+
+本地 Worker 需使用与 API sidecar 不同的 Dapr 端口；创建任务时 API 的 `DAPR_GRPC_PORT` 与 Worker 的 sidecar 通过同一 Dapr 运行时共享 Workflow 任务队列（Compose 部署时无需手动区分端口）。
+
 Windows PowerShell：
 
 ```powershell
@@ -95,10 +105,22 @@ uv run --directory apps/api dapr run `
 **方式 B：Docker Compose（未安装 Dapr CLI 时推荐）**
 
 ```bash
-docker compose up -d --build api api-daprd
+docker compose up -d --build api api-daprd worker worker-daprd placement scheduler
 ```
 
-**方式 C：仅 API（无 Dapr，Day 3 State/Pub/Sub 不可用）**
+Compose 模式下 API 会通过 `WORKFLOW_DAPR_GRPC_HOST=worker` 将 Workflow 实例调度到
+worker sidecar；`api-daprd` 仍负责 API 自身的 State、Pub/Sub、Service Invocation 和 ready
+检查。`api` 也声明了 `worker-daprd` 依赖，单独启动 `api` 时 Compose 会拉起 Workflow
+所需组件；显式列出完整集合便于演示时确认服务都在运行。
+
+**Worker 水平扩展（Compose 限制）**
+
+当前 Compose 使用 `worker-daprd` 的 `network_mode: service:worker`，每个 Worker 副本需要独立
+sidecar；`docker compose up --scale worker=2` **不会**为第二个 Worker 自动挂载 Dapr sidecar。
+Day 4 演示请保持单 Worker；多 Worker 水平扩展与重启恢复验收需在后续 Kubernetes 或自定义
+Compose 编排中完成。
+
+**方式 C：仅 API（无 Dapr，Workflow/State/Pub/Sub 不可用）**
 
 ```bash
 uv run --package api uvicorn api.main:app --app-dir apps/api/src --reload --host 0.0.0.0 --port 8000
@@ -112,22 +134,46 @@ curl http://localhost:8000/ready
 curl http://localhost:8000/api/providers
 ```
 
-### 5. 任务 API（Day 3）
+### 5. 任务 API（Day 4 Workflow）
 
-创建任务（异步 runner 会推进 `queued → running → succeeded`）：
+创建任务后 API **立即返回** `task_id`；Dapr Workflow Worker 异步执行 `plan → writer` stub 步骤。
 
-```powershell
-curl -X POST http://localhost:8000/api/tasks `
-  -H "Content-Type: application/json" `
-  -d '{"user_query":"什么是 Dapr State Management","engine":"auto","session_id":"22222222-2222-2222-2222-222222222222"}'
+```bash
+curl -X POST http://localhost:8000/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"user_query":"什么是 Dapr Workflow","engine":"auto"}'
+```
+
+带人为延迟的恢复演示（省略 `delay_seconds` 时使用环境变量 `TASK_DELAY_SECONDS`；显式传 `0` 可关闭延迟）：
+
+```bash
+curl -X POST http://localhost:8000/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"user_query":"recovery demo","engine":"auto","delay_seconds":30}'
+```
+
+暂停与恢复：
+
+```bash
+curl -X POST http://localhost:8000/api/tasks/{task_id}/pause
+curl -X POST http://localhost:8000/api/tasks/{task_id}/resume
 ```
 
 查询任务详情与历史：
 
-```powershell
+```bash
 curl http://localhost:8000/api/tasks/{task_id}
 curl http://localhost:8000/api/tasks
 ```
+
+#### Worker 重启恢复演示
+
+1. 创建带 `delay_seconds: 30` 的任务，记录 `task_id`。
+2. 在延迟 Activity 运行期间执行 `docker compose stop worker`。
+3. 执行 `docker compose start worker`。
+4. 再次查询同一 `task_id`：状态应继续推进至 `succeeded`，已完成步骤不会重复入库（幂等键 `{task_id}:{step_name}`）。
+
+也可通过环境变量为所有任务设置默认延迟（仅演示）：`TASK_DELAY_SECONDS=30`。
 
 用户结构化偏好（新 session 可读）：
 
@@ -196,20 +242,26 @@ uv run pytest apps/api/tests -q -m integration
 uv run pytest apps/api/tests -q -m smoke
 ```
 
+DurableAgent smoke test（需 Dapr sidecar + conversation 组件，默认单元测试 mock 构建）：
+
+```powershell
+uv run pytest apps/api/tests/test_durable_agent_smoke.py -q
+```
+
 ## 目录结构
 
 ```text
-apps/api/          FastAPI 后端（persistence、events、tasks API）
+apps/api/          FastAPI 后端（persistence、events、workflows、tasks API）
 apps/mcp-server/   MCP Server 占位
 apps/web/          React + Vite 前端骨架
 dapr/              Dapr 组件与配置模板
-infra/             Prometheus、Dockerfile 等基础设施配置
-compose.yaml       中间件 + API + Dapr sidecar 编排
+infra/             Prometheus、Dockerfile、worker entrypoint
+compose.yaml       中间件 + API + Worker + Dapr sidecar 编排
 ```
 
 ## Dapr 组件
 
-Dapr 组件模板位于 `dapr/components/`。Day 3 起通过 sidecar 接入 State（`statestore`）与 Pub/Sub（`pubsub`）。LangGraph checkpoint 使用 `DaprCheckpointSaver` 写入 Dapr State。
+Dapr 组件模板位于 `dapr/components/`。Day 4 起 API 通过 Dapr Workflow 调度任务，Worker 注册 `task_orchestration` Workflow 与 Activity；State（`statestore`）与 Pub/Sub（`pubsub`）仍由 sidecar 提供。LangGraph checkpoint 使用 `DaprCheckpointSaver` 写入 Dapr State。
 
 ## 开发规范
 

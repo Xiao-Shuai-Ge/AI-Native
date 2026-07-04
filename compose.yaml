@@ -76,6 +76,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-ainative}
       DAPR_HTTP_PORT: 3500
       DAPR_GRPC_PORT: 50001
+      WORKFLOW_DAPR_GRPC_HOST: worker
+      WORKFLOW_DAPR_GRPC_PORT: 50001
       LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
     depends_on:
@@ -83,6 +85,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      worker-daprd:
+        condition: service_started
     networks:
       - ainative
 
@@ -92,6 +96,8 @@ services:
     network_mode: "service:api"
     depends_on:
       - api
+      - placement
+      - scheduler
     command:
       - "./daprd"
       - "-app-id"
@@ -106,10 +112,99 @@ services:
       - "/components"
       - "-config"
       - "/config/config.yaml"
+      - "-placement-host-address"
+      - "placement:50005"
+      - "-scheduler-host-address"
+      - "scheduler:50006"
     volumes:
       - ./dapr/components/statestore.yaml:/components/statestore.yaml:ro
       - ./dapr/components/pubsub.yaml:/components/pubsub.yaml:ro
       - ./dapr/config:/config:ro
+
+  worker:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    command: ["/app/infra/docker/docker-entrypoint-worker.sh"]
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-ainative}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ainative}
+      POSTGRES_DB: ${POSTGRES_DB:-ainative}
+      DAPR_HTTP_PORT: 3500
+      DAPR_GRPC_PORT: 50001
+      DAPR_APP_ID: worker
+      DAPR_COMPONENTS_PATH: /dapr/components
+      DAPR_CONFIG_PATH: /dapr/config/config.yaml
+      LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    volumes:
+      - ./dapr/components:/dapr/components:ro
+      - ./dapr/config:/dapr/config:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - ainative
+
+  worker-daprd:
+    image: daprio/daprd:1.15.0
+    network_mode: "service:worker"
+    depends_on:
+      - worker
+      - placement
+      - scheduler
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "worker"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+      - "-config"
+      - "/config/config.yaml"
+      - "-placement-host-address"
+      - "placement:50005"
+      - "-scheduler-host-address"
+      - "scheduler:50006"
+    volumes:
+      - ./dapr/components/statestore.yaml:/components/statestore.yaml:ro
+      - ./dapr/components/pubsub.yaml:/components/pubsub.yaml:ro
+      - ./dapr/config:/config:ro
+
+  placement:
+    image: daprio/placement:1.15.0
+    command:
+      - "./placement"
+      - "--listen-address"
+      - "0.0.0.0"
+      - "--port"
+      - "50005"
+    networks:
+      - ainative
+
+  scheduler:
+    image: daprio/scheduler:1.15.0
+    command:
+      - "./scheduler"
+      - "--listen-address"
+      - "0.0.0.0"
+      - "--port"
+      - "50006"
+      - "--etcd-data-dir"
+      - "/tmp/dapr-scheduler"
+      - "--override-broadcast-host-port"
+      - "scheduler:50006"
+    networks:
+      - ainative
 
 networks:
   ainative:

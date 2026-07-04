@@ -10,3 +10,5 @@ spec:
       value: redis:6379
     - name: keyPrefix
       value: ainative
+    - name: actorStateStore
+      value: "true"

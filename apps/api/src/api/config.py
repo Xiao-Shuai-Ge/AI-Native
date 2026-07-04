@@ -13,6 +13,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
@@ -30,6 +31,8 @@ class Settings(BaseSettings):
 
     dapr_http_port: int = Field(default=3500, alias="DAPR_HTTP_PORT")
     dapr_grpc_port: int = Field(default=50001, alias="DAPR_GRPC_PORT")
+    workflow_dapr_grpc_host: str | None = Field(default=None, alias="WORKFLOW_DAPR_GRPC_HOST")
+    workflow_dapr_grpc_port: int | None = Field(default=None, alias="WORKFLOW_DAPR_GRPC_PORT")
 
     mcp_server_url: str = Field(default="http://localhost:8001", alias="MCP_SERVER_URL")
 
@@ -55,6 +58,8 @@ class Settings(BaseSettings):
     anthropic_model: str = Field(default="claude-3-5-sonnet-latest", alias="ANTHROPIC_MODEL")
     llm_timeout_seconds: float = Field(default=60.0, alias="LLM_TIMEOUT_SECONDS")
     llm_max_retries: int = Field(default=1, alias="LLM_MAX_RETRIES")
+
+    task_delay_seconds: float = Field(default=0.0, alias="TASK_DELAY_SECONDS")
 
     @property
     def redis_url(self) -> str:

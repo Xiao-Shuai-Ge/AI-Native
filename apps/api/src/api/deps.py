@@ -13,6 +13,7 @@ from persistence.dapr_client import DaprHttpClient
 from persistence.dapr_state import DaprStateStore
 from persistence.database import create_engine, create_session_factory
 from persistence.session_store import SessionStore
+from workflows.client import WorkflowScheduler
 
 
 @dataclass
@@ -25,6 +26,7 @@ class AppState:
     session_store: SessionStore
     event_publisher: AgentTaskEventPublisher
     event_handler: AgentTaskEventHandler
+    workflow_scheduler: WorkflowScheduler
 
 
 def build_app_state(settings: Settings) -> AppState:
@@ -40,10 +42,15 @@ def build_app_state(settings: Settings) -> AppState:
         session_store=SessionStore.from_settings(settings),
         event_publisher=AgentTaskEventPublisher(dapr_client),
         event_handler=AgentTaskEventHandler(session_factory),
+        workflow_scheduler=WorkflowScheduler(
+            grpc_host=settings.workflow_dapr_grpc_host,
+            grpc_port=settings.workflow_dapr_grpc_port or settings.dapr_grpc_port,
+        ),
     )
 
 
 async def shutdown_app_state(state: AppState) -> None:
+    state.workflow_scheduler.close()
     await state.dapr_client.aclose()
     await state.session_store.aclose()
     await state.engine.dispose()

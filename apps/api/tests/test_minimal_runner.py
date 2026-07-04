@@ -10,8 +10,8 @@ from api.config import get_settings
 from api.services.minimal_runner import MinimalTaskRunner
 from events.schemas import AgentTaskEventPublisher
 from orchestration.models import EngineChoice, TaskStatus
-from persistence.database import build_async_database_url
 from persistence.dapr_state import DaprStateStore
+from persistence.database import build_async_database_url
 from persistence.repository import TaskRepository
 
 

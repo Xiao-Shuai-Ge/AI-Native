@@ -11,3 +11,7 @@ spec:
       protocol: grpc
   metric:
     enabled: true
+  actors:
+    stateStoreName: statestore
+  workflow:
+    stateStoreName: statestore

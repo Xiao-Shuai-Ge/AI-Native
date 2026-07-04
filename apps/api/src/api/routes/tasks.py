@@ -7,10 +7,11 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from api.schemas.tasks import (
     CreateTaskRequest,
     CreateTaskResponse,
+    TaskControlResponse,
     TaskDetailResponse,
     TaskSummaryResponse,
 )
-from api.services.task_service import TaskService
+from api.services.task_service import TaskService, WorkflowScheduleError
 from orchestration.models import TaskRequest
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -23,6 +24,8 @@ def _task_service(request: Request) -> TaskService:
         state.dapr_state,
         state.session_store,
         state.event_publisher,
+        state.workflow_scheduler,
+        default_delay_seconds=state.settings.task_delay_seconds,
     )
 
 
@@ -37,10 +40,16 @@ async def create_task(body: CreateTaskRequest, request: Request) -> CreateTaskRe
                 user_id=body.user_id,
                 user_query=body.user_query,
                 engine=body.engine,
+                delay_seconds=body.delay_seconds,
             )
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WorkflowScheduleError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"task_id": str(exc.task_id), "message": str(exc)},
+        ) from exc
     return CreateTaskResponse.model_validate(result)
 
 
@@ -94,3 +103,27 @@ async def get_task(task_id: UUID, request: Request) -> TaskDetailResponse:
         "session_context": session_context,
     }
     return TaskDetailResponse.model_validate(payload)
+
+
+@router.post("/{task_id}/pause", response_model=TaskControlResponse)
+async def pause_task(task_id: UUID, request: Request) -> TaskControlResponse:
+    service = _task_service(request)
+    try:
+        result = await service.pause_task(task_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return TaskControlResponse.model_validate(result)
+
+
+@router.post("/{task_id}/resume", response_model=TaskControlResponse)
+async def resume_task(task_id: UUID, request: Request) -> TaskControlResponse:
+    service = _task_service(request)
+    try:
+        result = await service.resume_task(task_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return TaskControlResponse.model_validate(result)

@@ -14,6 +14,7 @@ class CreateTaskRequest(BaseModel):
     user_id: str | None = None
     user_query: str = Field(min_length=1)
     engine: EngineChoice = EngineChoice.AUTO
+    delay_seconds: float | None = Field(default=None, ge=0.0, le=600.0)
 
 
 class TaskStepResponse(BaseModel):
@@ -74,3 +75,9 @@ class CreateTaskResponse(BaseModel):
     engine_requested: EngineChoice
     user_preferences: dict[str, object] = Field(default_factory=dict)
     session_context: list[dict[str, object]] = Field(default_factory=list)
+
+
+class TaskControlResponse(BaseModel):
+    task_id: UUID
+    workflow_id: str
+    status: TaskStatus
