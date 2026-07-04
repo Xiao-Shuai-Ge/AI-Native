@@ -19,6 +19,11 @@ class DaprStateStore:
     async def save_task_runtime_state(self, task_id: UUID, snapshot: dict[str, Any]) -> None:
         await self._client.save_state(runtime_state_key(task_id), snapshot)
 
+    async def merge_task_runtime_state(self, task_id: UUID, patch: dict[str, Any]) -> None:
+        existing = await self.get_task_runtime_state(task_id)
+        merged = {**(existing or {}), **patch}
+        await self.save_task_runtime_state(task_id, merged)
+
     async def get_task_runtime_state(self, task_id: UUID) -> dict[str, Any] | None:
         return await self._client.get_state(runtime_state_key(task_id))
 

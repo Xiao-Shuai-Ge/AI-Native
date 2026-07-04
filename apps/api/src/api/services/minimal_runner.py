@@ -100,12 +100,7 @@ class MinimalTaskRunner:
             )
         except Exception as exc:
             logger.exception("minimal runner failed", extra={"task_id": str(task_id)})
-            async with self._session_factory() as session:
-                repo = TaskRepository(session)
-                task = await repo.get_task(task_id)
-                if task is not None and task.status != TaskStatus.SUCCEEDED.value:
-                    await repo.update_task_status(task_id, TaskStatus.FAILED)
-                    await session.commit()
+            await self._mark_task_failed(task_id)
             await self._publish_and_persist(
                 task_id,
                 engine="unknown",
@@ -156,9 +151,23 @@ class MinimalTaskRunner:
         if report is not None:
             snapshot["report"] = report
         try:
-            await self._dapr_state.save_task_runtime_state(task_id, snapshot)
+            await self._dapr_state.merge_task_runtime_state(task_id, snapshot)
         except Exception as exc:
             logger.warning(
                 "failed to save dapr runtime state",
                 extra={"task_id": str(task_id), "error": str(exc)},
             )
+
+    async def _mark_task_failed(self, task_id: UUID) -> None:
+        async with self._session_factory() as session:
+            repo = TaskRepository(session)
+            task = await repo.get_task(task_id)
+            if task is None:
+                return
+            current = TaskStatus(task.status)
+            if current in (TaskStatus.SUCCEEDED, TaskStatus.CANCELLED, TaskStatus.FAILED):
+                return
+            if current in (TaskStatus.QUEUED, TaskStatus.PAUSED):
+                await repo.update_task_status(task_id, TaskStatus.RUNNING)
+            await repo.update_task_status(task_id, TaskStatus.FAILED)
+            await session.commit()
