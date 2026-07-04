@@ -56,12 +56,15 @@ async def test_invalid_structured_output_raises_parse_error() -> None:
         )
 
 
-def test_factory_requires_api_key_for_deepseek() -> None:
-    settings = Settings.model_validate(
-        {
-            "llm_provider": "deepseek",
-            "deepseek_api_key": "",
-        }
+def test_factory_requires_api_key_for_deepseek(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `Settings` still merges in the process environment/`.env` file even
+    # when constructed explicitly, so a real DEEPSEEK_API_KEY in the
+    # developer's `.env` would otherwise mask the empty value under test.
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    settings = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        llm_provider="deepseek",
+        deepseek_api_key="",
     )
     with pytest.raises(LLMConfigurationError):
         create_llm_client(settings)

@@ -16,7 +16,11 @@ from workflows.activities.task_activities import (
     finalize_task,
     initialize_task,
     mark_task_failed,
+    run_crewai_analyst,
+    run_crewai_researcher,
+    run_crewai_writer,
     run_langgraph_graph,
+    select_engine,
 )
 from workflows.sync_runtime import init_activity_runtime, shutdown_activity_runtime_sync
 from workflows.task_workflow import task_orchestration
@@ -41,6 +45,10 @@ def build_workflow_runtime() -> WorkflowRuntime:
     runtime.register_activity(finalize_task)
     runtime.register_activity(mark_task_failed)
     runtime.register_activity(run_langgraph_graph)
+    runtime.register_activity(select_engine)
+    runtime.register_activity(run_crewai_researcher)
+    runtime.register_activity(run_crewai_analyst)
+    runtime.register_activity(run_crewai_writer)
     return runtime
 
 

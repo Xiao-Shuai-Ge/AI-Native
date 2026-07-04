@@ -74,6 +74,61 @@ class LangGraphStepResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class SelectEngineInput(BaseModel):
+    task_id: UUID
+    session_id: UUID
+    user_id: str
+    user_query: str
+
+
+class SelectEngineResult(BaseModel):
+    engine_selected: str
+    reason: str
+    subtasks: dict[str, str] = Field(default_factory=dict)
+
+
+class CrewAIResearcherInput(BaseModel):
+    task_id: UUID
+    session_id: UUID
+    user_id: str
+    user_query: str
+    engine: str
+    subtask: str | None = None
+
+
+class CrewAIResearcherResult(BaseModel):
+    notes: list[str] = Field(default_factory=list)
+    sources: list[dict[str, str]] = Field(default_factory=list)
+
+
+class CrewAIAnalystInput(BaseModel):
+    task_id: UUID
+    session_id: UUID
+    user_id: str
+    user_query: str
+    engine: str
+    research_notes: list[str] = Field(default_factory=list)
+    subtask: str | None = None
+
+
+class CrewAIAnalystResult(BaseModel):
+    analysis: str
+
+
+class CrewAIWriterInput(BaseModel):
+    task_id: UUID
+    session_id: UUID
+    user_id: str
+    user_query: str
+    engine: str
+    research_notes: list[str] = Field(default_factory=list)
+    analysis: str | None = None
+
+
+class CrewAIWriterResult(BaseModel):
+    report: str
+
+
 class FinalizeTaskInput(BaseModel):
     task_id: UUID
     session_id: UUID

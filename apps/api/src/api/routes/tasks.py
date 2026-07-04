@@ -22,9 +22,7 @@ from orchestration.models import TaskRequest, TaskStatus
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
-TERMINAL_STATUSES = frozenset(
-    {TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELLED}
-)
+TERMINAL_STATUSES = frozenset({TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELLED})
 HEARTBEAT_INTERVAL_SECONDS = 15.0
 TERMINAL_CHECK_INTERVAL_SECONDS = 60.0
 

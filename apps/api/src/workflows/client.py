@@ -8,7 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 from dapr.ext.workflow import DaprWorkflowClient
 
-from workflows.models import TASK_WORKFLOW_NAME, TaskWorkflowInput
+from workflows.models import TaskWorkflowInput
+from workflows.task_workflow import task_orchestration
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class WorkflowScheduler:
     def _schedule_task_sync(self, wf_input: TaskWorkflowInput) -> str:
         payload = wf_input.model_dump(mode="json")
         return self._client.schedule_new_workflow(
-            TASK_WORKFLOW_NAME,
+            task_orchestration,
             input=payload,
             instance_id=wf_input.workflow_id,
         )

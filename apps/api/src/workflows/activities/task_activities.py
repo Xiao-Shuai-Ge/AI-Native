@@ -5,17 +5,22 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
+from typing import TypeVar
 from uuid import UUID
 
 from dapr.ext.workflow import WorkflowActivityContext
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from api.services.settings_service import SettingsService
 from events.schemas import AgentTaskEvent
 from llm.factory import create_llm_client
+from orchestration.crewai_engine.roles_runner import run_analyst, run_researcher, run_writer
+from orchestration.engine_router import EngineRouter
 from orchestration.langgraph_engine.engine import LangGraphEngine
 from orchestration.models import EngineChoice, TaskRequest, TaskState, TaskStatus
 from persistence.checkpointer import DaprCheckpointSaver
+from persistence.dapr_client import DaprHttpClient
 from persistence.idempotency import step_idempotency_key
 from persistence.models import TaskStepRecord
 from persistence.repository import TaskRepository
@@ -26,6 +31,12 @@ from workflows.constraints import (
 from workflows.models import (
     DELAYED_PROBE_STEP,
     ActivityStepResult,
+    CrewAIAnalystInput,
+    CrewAIAnalystResult,
+    CrewAIResearcherInput,
+    CrewAIResearcherResult,
+    CrewAIWriterInput,
+    CrewAIWriterResult,
     DelayedStepInput,
     DelayedStepResult,
     FinalizeTaskInput,
@@ -33,13 +44,27 @@ from workflows.models import (
     InitializeTaskResult,
     LangGraphStepInput,
     LangGraphStepResult,
+    SelectEngineInput,
+    SelectEngineResult,
     StepActivityInput,
     TaskFailureInput,
     TaskWorkflowInput,
 )
-from workflows.sync_runtime import get_activity_runtime
+from workflows.sync_runtime import ActivityRuntime, get_activity_runtime, run_async
 
 logger = logging.getLogger(__name__)
+
+TModel = TypeVar("TModel", bound=BaseModel)
+
+
+def _coerce_input(model: type[TModel], value: TModel | dict[str, object]) -> TModel:
+    if isinstance(value, model):
+        return value
+    return model.model_validate(value)
+
+
+def _activity_result(model: BaseModel) -> dict[str, object]:
+    return model.model_dump(mode="json")
 
 
 async def _publish_event(
@@ -93,6 +118,13 @@ async def _update_runtime_state(
         )
 
 
+def _require_dapr_client(runtime: ActivityRuntime) -> DaprHttpClient:
+    if runtime.dapr_client is None:
+        msg = "activity runtime is missing a dapr_client"
+        raise RuntimeError(msg)
+    return runtime.dapr_client
+
+
 async def _step_exists(task_id: UUID, idempotency_key: str) -> bool:
     runtime = get_activity_runtime()
     async with runtime.session_factory() as session:
@@ -120,7 +152,11 @@ async def _initialize_task_impl(wf_input: TaskWorkflowInput) -> InitializeTaskRe
                 extra={"task_id": str(task_id), "status": current.value},
             )
             return InitializeTaskResult()
-        await repo.update_task_status(task_id, TaskStatus.RUNNING, engine_selected=engine)
+        # Manual engine choices override auto-routing immediately; `auto` is
+        # left unresolved here and settled by `select_engine` so a manual
+        # choice can never be silently overwritten by the router.
+        selected = None if engine == EngineChoice.AUTO else engine
+        await repo.update_task_status(task_id, TaskStatus.RUNNING, engine_selected=selected)
         await session.commit()
 
     await _publish_event(
@@ -134,12 +170,14 @@ async def _initialize_task_impl(wf_input: TaskWorkflowInput) -> InitializeTaskRe
     return InitializeTaskResult()
 
 
-async def initialize_task(
+def initialize_task(
     _ctx: WorkflowActivityContext,
-    wf_input: TaskWorkflowInput,
-) -> InitializeTaskResult:
+    wf_input: TaskWorkflowInput | dict[str, object],
+) -> dict[str, object]:
+    parsed = _coerce_input(TaskWorkflowInput, wf_input)
     timeout = ACTIVITY_TIMEOUTS["initialize_task"].total_seconds()
-    return await asyncio.wait_for(_initialize_task_impl(wf_input), timeout=timeout)
+    result = run_async(asyncio.wait_for(_initialize_task_impl(parsed), timeout=timeout))
+    return _activity_result(result)
 
 
 async def _execute_step_impl(step_input: StepActivityInput) -> ActivityStepResult:
@@ -180,12 +218,14 @@ async def _execute_step_impl(step_input: StepActivityInput) -> ActivityStepResul
     return ActivityStepResult(step_name=step_name, created=created)
 
 
-async def execute_step(
+def execute_step(
     _ctx: WorkflowActivityContext,
-    step_input: StepActivityInput,
-) -> ActivityStepResult:
+    step_input: StepActivityInput | dict[str, object],
+) -> dict[str, object]:
+    parsed = _coerce_input(StepActivityInput, step_input)
     timeout = ACTIVITY_TIMEOUTS["execute_step"].total_seconds()
-    return await asyncio.wait_for(_execute_step_impl(step_input), timeout=timeout)
+    result = run_async(asyncio.wait_for(_execute_step_impl(parsed), timeout=timeout))
+    return _activity_result(result)
 
 
 async def _record_langgraph_node(task_id: UUID, step_name: str, status: str) -> None:
@@ -269,12 +309,251 @@ async def _run_langgraph_graph_impl(step_input: LangGraphStepInput) -> LangGraph
     return LangGraphStepResult(report=result.report, errors=result.errors)
 
 
-async def run_langgraph_graph(
+def run_langgraph_graph(
     _ctx: WorkflowActivityContext,
-    step_input: LangGraphStepInput,
-) -> LangGraphStepResult:
+    step_input: LangGraphStepInput | dict[str, object],
+) -> dict[str, object]:
+    parsed = _coerce_input(LangGraphStepInput, step_input)
     timeout = ACTIVITY_TIMEOUTS["run_langgraph_graph"].total_seconds()
-    return await asyncio.wait_for(_run_langgraph_graph_impl(step_input), timeout=timeout)
+    result = run_async(asyncio.wait_for(_run_langgraph_graph_impl(parsed), timeout=timeout))
+    return _activity_result(result)
+
+
+async def _select_engine_impl(step_input: SelectEngineInput) -> SelectEngineResult:
+    runtime = get_activity_runtime()
+    task_id = step_input.task_id
+
+    settings_service = SettingsService(_require_dapr_client(runtime), runtime.settings)
+    runtime_settings = await settings_service.get_settings()
+    llm = create_llm_client(runtime.settings, runtime_llm=runtime_settings.llm)
+
+    decision = await EngineRouter().select(
+        step_input.user_query,
+        llm=llm,
+        task_id=str(task_id),
+    )
+
+    async with runtime.session_factory() as session:
+        repo = TaskRepository(session)
+        await repo.update_task_status(
+            task_id,
+            TaskStatus.RUNNING,
+            engine_selected=decision.engine,
+            engine_selection_reason=decision.reason,
+        )
+        await session.commit()
+
+    await _publish_event(
+        task_id=task_id,
+        engine=decision.engine.value,
+        step="select_engine",
+        status="completed",
+        detail=decision.reason,
+    )
+    return SelectEngineResult(
+        engine_selected=decision.engine.value,
+        reason=decision.reason,
+        subtasks=decision.subtasks,
+    )
+
+
+def select_engine(
+    _ctx: WorkflowActivityContext,
+    step_input: SelectEngineInput | dict[str, object],
+) -> dict[str, object]:
+    parsed = _coerce_input(SelectEngineInput, step_input)
+    timeout = ACTIVITY_TIMEOUTS["select_engine"].total_seconds()
+    result = run_async(asyncio.wait_for(_select_engine_impl(parsed), timeout=timeout))
+    return _activity_result(result)
+
+
+async def _run_crewai_researcher_impl(
+    step_input: CrewAIResearcherInput,
+) -> CrewAIResearcherResult:
+    runtime = get_activity_runtime()
+    task_id = step_input.task_id
+    step_name = "researcher"
+    idempotency_key = step_idempotency_key(task_id, step_name, "crewai")
+
+    async with runtime.session_factory() as session:
+        existing = await session.execute(
+            select(TaskStepRecord).where(TaskStepRecord.idempotency_key == idempotency_key)
+        )
+        record = existing.scalar_one_or_none()
+        if record is not None and record.output_json is not None:
+            return CrewAIResearcherResult.model_validate(record.output_json)
+
+    settings_service = SettingsService(_require_dapr_client(runtime), runtime.settings)
+    runtime_settings = await settings_service.get_settings()
+    role_registry = settings_service.role_registry_from_settings(runtime_settings)
+    llm = create_llm_client(runtime.settings, runtime_llm=runtime_settings.llm)
+
+    notes_result = await run_researcher(
+        step_input.user_query,
+        task_id=task_id,
+        llm=llm,
+        subtask=step_input.subtask,
+        role=role_registry.get("researcher"),
+    )
+    result = CrewAIResearcherResult(
+        notes=list(notes_result.notes),
+        sources=list(notes_result.sources),
+    )
+
+    await _publish_event(
+        task_id=task_id,
+        engine=step_input.engine,
+        step=step_name,
+        status="completed",
+        detail=f"{step_name} finished",
+    )
+    async with runtime.session_factory() as session:
+        repo = TaskRepository(session)
+        await repo.record_step(
+            task_id=task_id,
+            step_name=step_name,
+            status="completed",
+            output_json=result.model_dump(),
+            idempotency_key=idempotency_key,
+        )
+        await session.commit()
+    await _update_runtime_state(task_id, TaskStatus.RUNNING, current_step=step_name)
+    return result
+
+
+def run_crewai_researcher(
+    _ctx: WorkflowActivityContext,
+    step_input: CrewAIResearcherInput | dict[str, object],
+) -> dict[str, object]:
+    parsed = _coerce_input(CrewAIResearcherInput, step_input)
+    timeout = ACTIVITY_TIMEOUTS["run_crewai_researcher"].total_seconds()
+    result = run_async(asyncio.wait_for(_run_crewai_researcher_impl(parsed), timeout=timeout))
+    return _activity_result(result)
+
+
+async def _run_crewai_analyst_impl(step_input: CrewAIAnalystInput) -> CrewAIAnalystResult:
+    runtime = get_activity_runtime()
+    task_id = step_input.task_id
+    step_name = "analyst"
+    idempotency_key = step_idempotency_key(task_id, step_name, "crewai")
+
+    async with runtime.session_factory() as session:
+        existing = await session.execute(
+            select(TaskStepRecord).where(TaskStepRecord.idempotency_key == idempotency_key)
+        )
+        record = existing.scalar_one_or_none()
+        if record is not None and record.output_json is not None:
+            return CrewAIAnalystResult.model_validate(record.output_json)
+
+    settings_service = SettingsService(_require_dapr_client(runtime), runtime.settings)
+    runtime_settings = await settings_service.get_settings()
+    role_registry = settings_service.role_registry_from_settings(runtime_settings)
+    llm = create_llm_client(runtime.settings, runtime_llm=runtime_settings.llm)
+
+    analysis_result = await run_analyst(
+        step_input.user_query,
+        task_id=task_id,
+        llm=llm,
+        research_notes=step_input.research_notes,
+        subtask=step_input.subtask,
+        role=role_registry.get("analyst"),
+    )
+    result = CrewAIAnalystResult(analysis=analysis_result.analysis)
+
+    await _publish_event(
+        task_id=task_id,
+        engine=step_input.engine,
+        step=step_name,
+        status="completed",
+        detail=f"{step_name} finished",
+    )
+    async with runtime.session_factory() as session:
+        repo = TaskRepository(session)
+        await repo.record_step(
+            task_id=task_id,
+            step_name=step_name,
+            status="completed",
+            output_json=result.model_dump(),
+            idempotency_key=idempotency_key,
+        )
+        await session.commit()
+    await _update_runtime_state(task_id, TaskStatus.RUNNING, current_step=step_name)
+    return result
+
+
+def run_crewai_analyst(
+    _ctx: WorkflowActivityContext,
+    step_input: CrewAIAnalystInput | dict[str, object],
+) -> dict[str, object]:
+    parsed = _coerce_input(CrewAIAnalystInput, step_input)
+    timeout = ACTIVITY_TIMEOUTS["run_crewai_analyst"].total_seconds()
+    result = run_async(asyncio.wait_for(_run_crewai_analyst_impl(parsed), timeout=timeout))
+    return _activity_result(result)
+
+
+async def _run_crewai_writer_impl(step_input: CrewAIWriterInput) -> CrewAIWriterResult:
+    runtime = get_activity_runtime()
+    task_id = step_input.task_id
+    step_name = "writer"
+    idempotency_key = step_idempotency_key(task_id, step_name, "crewai")
+
+    async with runtime.session_factory() as session:
+        existing = await session.execute(
+            select(TaskStepRecord).where(TaskStepRecord.idempotency_key == idempotency_key)
+        )
+        record = existing.scalar_one_or_none()
+        if record is not None and record.output_json is not None:
+            return CrewAIWriterResult.model_validate(record.output_json)
+
+    settings_service = SettingsService(_require_dapr_client(runtime), runtime.settings)
+    runtime_settings = await settings_service.get_settings()
+    role_registry = settings_service.role_registry_from_settings(runtime_settings)
+    llm = create_llm_client(runtime.settings, runtime_llm=runtime_settings.llm)
+
+    writer_result = await run_writer(
+        step_input.user_query,
+        task_id=task_id,
+        llm=llm,
+        research_notes=step_input.research_notes,
+        analysis=step_input.analysis,
+        role=role_registry.get("writer"),
+    )
+    result = CrewAIWriterResult(report=writer_result.markdown)
+
+    await _publish_event(
+        task_id=task_id,
+        engine=step_input.engine,
+        step=step_name,
+        status="completed",
+        detail=f"{step_name} finished",
+    )
+    async with runtime.session_factory() as session:
+        repo = TaskRepository(session)
+        await repo.record_step(
+            task_id=task_id,
+            step_name=step_name,
+            status="completed",
+            output_json=result.model_dump(),
+            idempotency_key=idempotency_key,
+        )
+        await session.commit()
+    await _update_runtime_state(
+        task_id,
+        TaskStatus.RUNNING,
+        current_step=step_name,
+        report=result.report,
+    )
+    return result
+
+
+def run_crewai_writer(
+    _ctx: WorkflowActivityContext,
+    step_input: CrewAIWriterInput | dict[str, object],
+) -> dict[str, object]:
+    parsed = _coerce_input(CrewAIWriterInput, step_input)
+    timeout = ACTIVITY_TIMEOUTS["run_crewai_writer"].total_seconds()
+    result = run_async(asyncio.wait_for(_run_crewai_writer_impl(parsed), timeout=timeout))
+    return _activity_result(result)
 
 
 async def _delayed_step_impl(step_input: DelayedStepInput) -> DelayedStepResult:
@@ -317,12 +596,14 @@ async def _delayed_step_impl(step_input: DelayedStepInput) -> DelayedStepResult:
     return DelayedStepResult(created=created, skipped=False)
 
 
-async def delayed_step(
+def delayed_step(
     _ctx: WorkflowActivityContext,
-    step_input: DelayedStepInput,
-) -> DelayedStepResult:
-    timeout = delayed_step_timeout(step_input.delay_seconds).total_seconds()
-    return await asyncio.wait_for(_delayed_step_impl(step_input), timeout=timeout)
+    step_input: DelayedStepInput | dict[str, object],
+) -> dict[str, object]:
+    parsed = _coerce_input(DelayedStepInput, step_input)
+    timeout = delayed_step_timeout(parsed.delay_seconds).total_seconds()
+    result = run_async(asyncio.wait_for(_delayed_step_impl(parsed), timeout=timeout))
+    return _activity_result(result)
 
 
 async def _finalize_task_impl(finalize_input: FinalizeTaskInput) -> FinalizeTaskResult:
@@ -364,12 +645,14 @@ async def _finalize_task_impl(finalize_input: FinalizeTaskInput) -> FinalizeTask
     return FinalizeTaskResult(report=report)
 
 
-async def finalize_task(
+def finalize_task(
     _ctx: WorkflowActivityContext,
-    finalize_input: FinalizeTaskInput,
-) -> FinalizeTaskResult:
+    finalize_input: FinalizeTaskInput | dict[str, object],
+) -> dict[str, object]:
+    parsed = _coerce_input(FinalizeTaskInput, finalize_input)
     timeout = ACTIVITY_TIMEOUTS["finalize_task"].total_seconds()
-    return await asyncio.wait_for(_finalize_task_impl(finalize_input), timeout=timeout)
+    result = run_async(asyncio.wait_for(_finalize_task_impl(parsed), timeout=timeout))
+    return _activity_result(result)
 
 
 async def _mark_task_failed_impl(failure_input: TaskFailureInput) -> dict[str, str]:
@@ -400,9 +683,10 @@ async def _mark_task_failed_impl(failure_input: TaskFailureInput) -> dict[str, s
     return {"status": TaskStatus.FAILED.value}
 
 
-async def mark_task_failed(
+def mark_task_failed(
     _ctx: WorkflowActivityContext,
-    failure_input: TaskFailureInput,
+    failure_input: TaskFailureInput | dict[str, object],
 ) -> dict[str, str]:
+    parsed = _coerce_input(TaskFailureInput, failure_input)
     timeout = ACTIVITY_TIMEOUTS["mark_task_failed"].total_seconds()
-    return await asyncio.wait_for(_mark_task_failed_impl(failure_input), timeout=timeout)
+    return run_async(asyncio.wait_for(_mark_task_failed_impl(parsed), timeout=timeout))

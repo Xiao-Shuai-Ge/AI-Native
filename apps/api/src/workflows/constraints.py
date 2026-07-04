@@ -14,6 +14,10 @@ ACTIVITY_TIMEOUTS: dict[str, timedelta] = {
     "finalize_task": timedelta(seconds=30),
     "mark_task_failed": timedelta(seconds=30),
     "run_langgraph_graph": timedelta(seconds=300),
+    "select_engine": timedelta(seconds=60),
+    "run_crewai_researcher": timedelta(seconds=120),
+    "run_crewai_analyst": timedelta(seconds=120),
+    "run_crewai_writer": timedelta(seconds=120),
 }
 
 
@@ -31,6 +35,8 @@ EXECUTE_STEP_RETRY = _retry(3)
 FINALIZE_RETRY = _retry(2)
 MARK_FAILED_RETRY = _retry(2)
 LANGGRAPH_STEP_RETRY = _retry(3, first_seconds=5.0)
+SELECT_ENGINE_RETRY = _retry(3, first_seconds=3.0)
+CREWAI_STEP_RETRY = _retry(3, first_seconds=5.0)
 
 
 def delayed_step_retry(delay_seconds: float) -> RetryPolicy:

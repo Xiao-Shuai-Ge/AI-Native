@@ -6,7 +6,8 @@ from uuid import uuid4
 import pytest
 
 from workflows.client import WorkflowScheduler
-from workflows.models import TASK_WORKFLOW_NAME, TaskWorkflowInput
+from workflows.models import TaskWorkflowInput
+from workflows.task_workflow import task_orchestration
 
 
 @pytest.fixture
@@ -37,7 +38,7 @@ async def test_schedule_task_uses_stable_instance_id(wf_input: TaskWorkflowInput
     assert instance_id == wf_input.workflow_id
     mock_client.schedule_new_workflow.assert_called_once()
     args, kwargs = mock_client.schedule_new_workflow.call_args
-    assert args[0] == TASK_WORKFLOW_NAME
+    assert args[0] is task_orchestration
     assert kwargs["instance_id"] == wf_input.workflow_id
     scheduler.close()
 

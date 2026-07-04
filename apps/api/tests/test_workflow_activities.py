@@ -1,5 +1,6 @@
 """Workflow activity unit tests."""
 
+import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -14,12 +15,16 @@ from llm.protocol import ChatMessage
 from orchestration.models import TaskStatus
 from persistence.models import TaskRecord
 from workflows.activities.task_activities import (
-    delayed_step,
-    execute_step,
-    finalize_task,
-    initialize_task,
-    mark_task_failed,
-    run_langgraph_graph,
+    _delayed_step_impl,
+    _execute_step_impl,
+    _finalize_task_impl,
+    _initialize_task_impl,
+    _mark_task_failed_impl,
+    _run_crewai_analyst_impl,
+    _run_crewai_researcher_impl,
+    _run_crewai_writer_impl,
+    _run_langgraph_graph_impl,
+    _select_engine_impl,
 )
 from workflows.models import (
     DelayedStepInput,
@@ -57,7 +62,7 @@ def activity_runtime() -> ActivityRuntime:
         session_factory=session_factory,
         dapr_state=dapr_state,
         event_publisher=event_publisher,
-        loop=MagicMock(),
+        loop=asyncio.new_event_loop(),
         dapr_client=dapr_client,
     )
 
@@ -106,7 +111,7 @@ async def test_initialize_task_updates_status(activity_runtime: ActivityRuntime)
     mock_repo.update_task_status = AsyncMock()
 
     with patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo):
-        result = await initialize_task(ctx, wf_input)
+        result = await _initialize_task_impl(wf_input)
 
     assert result.status == "running"
     mock_repo.update_task_status.assert_awaited_once()
@@ -129,7 +134,7 @@ async def test_execute_step_is_idempotent(activity_runtime: ActivityRuntime) -> 
         "workflows.activities.task_activities._step_exists",
         new=AsyncMock(return_value=True),
     ):
-        result = await execute_step(ctx, step_input)
+        result = await _execute_step_impl(step_input)
 
     assert result.created is False
     assert result.step_name == "plan"
@@ -148,7 +153,7 @@ async def test_initialize_task_skips_when_already_running(
     mock_repo.get_task.return_value = _task_record(wf_input, status=TaskStatus.RUNNING.value)
 
     with patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo):
-        result = await initialize_task(ctx, wf_input)
+        result = await _initialize_task_impl(wf_input)
 
     assert result.status == "running"
     mock_repo.update_task_status.assert_not_awaited()
@@ -178,7 +183,7 @@ async def test_finalize_task_skips_when_already_succeeded(
     mock_repo.get_task.return_value = record
 
     with patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo):
-        result = await finalize_task(ctx, _finalize_input(wf_input))
+        result = await _finalize_task_impl(_finalize_input(wf_input))
 
     assert result.report == "existing report"
     mock_repo.update_task_status.assert_not_awaited()
@@ -204,7 +209,7 @@ async def test_delayed_step_skips_sleep_when_step_exists(activity_runtime: Activ
         ),
         patch("workflows.activities.task_activities.asyncio.sleep", new=AsyncMock()) as sleep_mock,
     ):
-        result = await delayed_step(ctx, step_input)
+        result = await _delayed_step_impl(step_input)
 
     assert result.skipped is True
     sleep_mock.assert_not_awaited()
@@ -221,7 +226,7 @@ async def test_mark_task_failed_from_paused(activity_runtime: ActivityRuntime) -
     mock_repo.update_task_status = AsyncMock()
 
     with patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo):
-        result = await mark_task_failed(ctx, failure_input)
+        result = await _mark_task_failed_impl(failure_input)
 
     assert result["status"] == TaskStatus.FAILED.value
     assert mock_repo.update_task_status.await_count == 2
@@ -237,7 +242,7 @@ async def test_finalize_task_writes_report(activity_runtime: ActivityRuntime) ->
     mock_repo.update_task_status = AsyncMock()
 
     with patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo):
-        result = await finalize_task(ctx, _finalize_input(wf_input))
+        result = await _finalize_task_impl(_finalize_input(wf_input))
 
     assert result.status == "succeeded"
     assert str(wf_input.task_id) in result.report
@@ -255,7 +260,7 @@ async def test_finalize_task_uses_real_report_when_provided(
     mock_repo.update_task_status = AsyncMock()
 
     with patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo):
-        result = await finalize_task(ctx, _finalize_input(wf_input, report="# Real Report"))
+        result = await _finalize_task_impl(_finalize_input(wf_input, report="# Real Report"))
 
     assert result.report == "# Real Report"
 
@@ -299,7 +304,7 @@ async def test_run_langgraph_graph_executes_full_graph_and_publishes_node_events
             return_value=fake_llm,
         ),
     ):
-        result = await run_langgraph_graph(ctx, step_input)
+        result = await _run_langgraph_graph_impl(step_input)
 
     assert result.report is not None
     assert "T" in result.report

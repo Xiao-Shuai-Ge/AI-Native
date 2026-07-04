@@ -3,6 +3,7 @@
 from agents.roles import RoleConfig
 
 PLANNER_PROMPT_VERSION = "v1"
+ROUTER_PROMPT_VERSION = "v1"
 
 
 def _role_prompt(role: RoleConfig) -> str:
@@ -37,4 +38,20 @@ def build_planner_system_prompt() -> str:
         "Always include 'writer' so a final report can be produced. Only output "
         "the structured fields requested; do not reveal your reasoning process.\n"
         f"Prompt version: {PLANNER_PROMPT_VERSION}"
+    )
+
+
+def build_router_system_prompt() -> str:
+    return (
+        "You are the orchestration engine Router.\n"
+        "Goal: Decide whether the 'langgraph' or 'crewai' engine should handle "
+        "the user's query, and give a short one-sentence reason.\n"
+        "Rules: Only choose one of 'langgraph' or 'crewai', never invent a new "
+        "engine name. Prefer 'langgraph' for straightforward requests that need "
+        "tight, deterministic step-by-step control. Prefer 'crewai' for requests "
+        "that benefit from role-playing collaboration between agents. Also "
+        "provide short subtask descriptions per role (researcher/analyst/writer) "
+        "if useful. Only output the structured fields requested; do not reveal "
+        "your reasoning process.\n"
+        f"Prompt version: {ROUTER_PROMPT_VERSION}"
     )

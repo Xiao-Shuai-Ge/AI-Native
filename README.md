@@ -243,6 +243,8 @@ curl -X POST http://localhost:8000/api/dev/writer/summarize `
 | OpenAI | `LLM_PROVIDER=openai`，并设置 `OPENAI_API_KEY` |
 | Claude | `LLM_PROVIDER=anthropic`（或 `claude`），并设置 `ANTHROPIC_API_KEY` |
 
+CrewAI 引擎默认会把自身的 kickoff 重放缓存（与本项目的 PostgreSQL/Redis 持久化无关）写到系统临时目录 `$TMPDIR/ainative-crewai-storage`，并关闭其默认的匿名遥测上报；如需覆盖，可显式设置环境变量 `CREWAI_STORAGE_DIR`（自定义持久化目录）或 `CREWAI_DISABLE_TELEMETRY=false`（重新开启遥测）。
+
 ### 7. 启动前端骨架（可选）
 
 ```powershell
