@@ -1,5 +1,7 @@
 # AI Native 多智能体协作平台
 
+Day 5～6 交付：Web 控制台（新建任务、详情 SSE/轮询、历史、设置）、`GET/PUT /api/settings`、`GET /api/tasks/{id}/events` SSE。
+
 Day 4 交付：Dapr Workflow 耐久编排、独立 Worker、任务暂停/恢复、Worker 重启恢复演示、DurableAgent smoke test。
 
 Day 3 能力仍保留：PostgreSQL 业务存储、Dapr State/Pub/Sub、Redis 会话上下文、任务 CRUD API。
@@ -37,6 +39,8 @@ docker compose ps
 | Jaeger UI | 16686 | 分布式追踪 |
 | Jaeger OTLP | 4317 | OTLP gRPC |
 | Prometheus | 9090 | 指标 |
+| Web UI（Compose） | 5173 | React 控制台 |
+| Web UI（本地 dev） | 5173 | `npm run dev`，代理到 API |
 
 ### 3. 数据库迁移
 
@@ -134,7 +138,37 @@ curl http://localhost:8000/ready
 curl http://localhost:8000/api/providers
 ```
 
-### 5. 任务 API（Day 4 Workflow）
+### 5. 启动 Web 控制台
+
+**本地开发（推荐，热更新）**
+
+先确保 API 已启动（见上一节），然后：
+
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+浏览器打开 http://localhost:5173 。Vite 已将 `/api`、`/health`、`/ready` 代理到 `http://localhost:8000`。
+
+**Docker Compose**
+
+```bash
+docker compose up -d --build api api-daprd worker worker-daprd placement scheduler web
+```
+
+浏览器打开 http://localhost:5173 （或 `.env` 中 `WEB_PORT` 指定的端口）。
+
+Web 控制台包含三个页面：
+
+1. **新建任务** — 输入主题，选择 `自动 / LangGraph / CrewAI`，提交后跳转详情页。
+2. **任务详情** — 状态、引擎选择原因、Agent 时间线（SSE 实时更新，断线后有限重连并降级轮询）、暂停/恢复、最终报告。
+3. **历史与设置** — 历史任务列表；在线编辑三角色 role/goal/backstory/instructions 与模型 temperature/max_tokens。
+
+> **SSE 限制**：任务事件 SSE 通过 API 进程内广播推送。请保持 **单个 API 实例**（默认 Compose 配置），或确保负载均衡对 `/api/tasks/*/events` 使用 sticky session；多 API 副本且无 sticky 时，SSE 可能收不到实时事件，详情页会自动降级为轮询。
+
+### 6. 任务 API（Day 4 Workflow）
 
 创建任务后 API **立即返回** `task_id`；Dapr Workflow Worker 异步执行 `plan → writer` stub 步骤。
 

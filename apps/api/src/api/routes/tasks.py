@@ -1,8 +1,13 @@
 """Task CRUD routes."""
 
+import asyncio
+import json
+import time
+from collections.abc import AsyncIterator
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from api.schemas.tasks import (
     CreateTaskRequest,
@@ -12,9 +17,16 @@ from api.schemas.tasks import (
     TaskSummaryResponse,
 )
 from api.services.task_service import TaskService, WorkflowScheduleError
-from orchestration.models import TaskRequest
+from events.broadcaster import TaskEventBroadcaster
+from orchestration.models import TaskRequest, TaskStatus
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+TERMINAL_STATUSES = frozenset(
+    {TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+)
+HEARTBEAT_INTERVAL_SECONDS = 15.0
+TERMINAL_CHECK_INTERVAL_SECONDS = 60.0
 
 
 def _task_service(request: Request) -> TaskService:
@@ -115,6 +127,89 @@ async def pause_task(task_id: UUID, request: Request) -> TaskControlResponse:
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return TaskControlResponse.model_validate(result)
+
+
+def _event_broadcaster(request: Request) -> TaskEventBroadcaster:
+    return request.app.state.app_state.event_broadcaster
+
+
+def _format_sse(event: str, data: dict[str, object]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+
+
+async def _task_event_stream(
+    task_id: UUID,
+    service: TaskService,
+    broadcaster: TaskEventBroadcaster,
+) -> AsyncIterator[str]:
+    task = await service.get_task(task_id)
+    if task is None:
+        yield _format_sse("error", {"message": "task not found"})
+        return
+
+    yield _format_sse(
+        "snapshot",
+        {
+            "task_id": str(task_id),
+            "status": str(task["status"]),
+            "audit_events": task.get("audit_events", []),
+        },
+    )
+
+    status = str(task["status"])
+    if status in {item.value for item in TERMINAL_STATUSES}:
+        yield _format_sse("close", {"reason": status})
+        return
+
+    queue = broadcaster.subscribe(task_id)
+    last_terminal_check = time.monotonic()
+    try:
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=HEARTBEAT_INTERVAL_SECONDS)
+            except TimeoutError:
+                now = time.monotonic()
+                if now - last_terminal_check >= TERMINAL_CHECK_INTERVAL_SECONDS:
+                    last_terminal_check = now
+                    refreshed = await service.get_task(task_id)
+                    if refreshed is None:
+                        yield _format_sse("error", {"message": "task not found"})
+                        break
+                    status = str(refreshed["status"])
+                    if status in {item.value for item in TERMINAL_STATUSES}:
+                        yield _format_sse("close", {"reason": status})
+                        break
+                yield _format_sse("heartbeat", {"status": status})
+                continue
+
+            if event is None:
+                yield _format_sse("close", {"reason": "stream_closed"})
+                break
+
+            yield _format_sse("task_event", event.model_dump(mode="json"))
+            refreshed = await service.get_task(task_id)
+            if refreshed is not None:
+                status = str(refreshed["status"])
+                if status in {item.value for item in TERMINAL_STATUSES}:
+                    yield _format_sse("close", {"reason": status})
+                    break
+    finally:
+        broadcaster.unsubscribe(task_id, queue)
+
+
+@router.get("/{task_id}/events")
+async def stream_task_events(task_id: UUID, request: Request) -> StreamingResponse:
+    service = _task_service(request)
+    broadcaster = _event_broadcaster(request)
+    return StreamingResponse(
+        _task_event_stream(task_id, service, broadcaster),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/{task_id}/resume", response_model=TaskControlResponse)

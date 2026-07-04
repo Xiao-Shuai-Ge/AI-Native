@@ -283,7 +283,7 @@ async def test_run_langgraph_graph_executes_full_graph_and_publishes_node_events
         msg = f"unexpected schema: {schema}"
         raise AssertionError(msg)
 
-    activity_runtime.llm_client = FakeLLMClient(structured_handler=_structured_handler)
+    fake_llm = FakeLLMClient(structured_handler=_structured_handler)
 
     mock_repo = AsyncMock()
     mock_repo.record_step.return_value = object()
@@ -293,6 +293,10 @@ async def test_run_langgraph_graph_executes_full_graph_and_publishes_node_events
         patch(
             "workflows.activities.task_activities._step_exists",
             new=AsyncMock(return_value=False),
+        ),
+        patch(
+            "workflows.activities.task_activities.create_llm_client",
+            return_value=fake_llm,
         ),
     ):
         result = await run_langgraph_graph(ctx, step_input)

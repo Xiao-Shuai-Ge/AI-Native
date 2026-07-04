@@ -36,11 +36,15 @@ class AnthropicClient:
         api_key: str,
         model: str,
         http_client: httpx.AsyncClient | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._http_client = http_client
         self._owns_client = http_client is None
+        self._max_tokens = max_tokens
+        self._temperature = temperature
         self._provider_info = LLMProviderInfo(
             provider="anthropic",
             model=model,
@@ -112,7 +116,8 @@ class AnthropicClient:
 
         body: dict[str, Any] = {
             "model": self._model,
-            "max_tokens": 4096,
+            "max_tokens": self._max_tokens,
+            "temperature": self._temperature,
             "messages": anthropic_messages,
         }
         if system_parts:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from agents.prompts import build_writer_system_prompt
-from agents.roles import WRITER_ROLE
+from agents.roles import WRITER_ROLE, RoleConfig
 from agents.schemas import WriterSummary
 from llm.protocol import ChatMessage, ChatRole, LLMClient
 
@@ -21,6 +21,7 @@ class WriterAgent:
         llm: LLMClient,
         research_notes: list[str] | None = None,
         analysis: str | None = None,
+        role: RoleConfig | None = None,
     ) -> WriterSummary:
         user_content = f"Write a Markdown summary for this topic: {topic}"
         if research_notes:
@@ -28,10 +29,11 @@ class WriterAgent:
             user_content += f"\nResearch notes:\n{joined_notes}"
         if analysis:
             user_content += f"\nAnalysis:\n{analysis}"
+        role_config = role or WRITER_ROLE
         messages = [
             ChatMessage(
                 role=ChatRole.SYSTEM,
-                content=build_writer_system_prompt(WRITER_ROLE),
+                content=build_writer_system_prompt(role_config),
             ),
             ChatMessage(
                 role=ChatRole.USER,

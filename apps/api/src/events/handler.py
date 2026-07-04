@@ -5,6 +5,7 @@ import logging
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from events.broadcaster import TaskEventBroadcaster
 from events.schemas import AgentTaskEvent
 from persistence.idempotency import audit_idempotency_key
 from persistence.repository import TaskRepository
@@ -13,8 +14,14 @@ logger = logging.getLogger(__name__)
 
 
 class AgentTaskEventHandler:
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
+        broadcaster: TaskEventBroadcaster | None = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._broadcaster = broadcaster
 
     async def handle_payload(self, payload: dict[str, object]) -> bool:
         try:
@@ -39,7 +46,11 @@ class AgentTaskEventHandler:
                 idempotency_key=idempotency_key,
             )
             await session.commit()
-            return record is not None
+            created = record is not None
+
+        if created and self._broadcaster is not None:
+            await self._broadcaster.publish(event)
+        return created
 
     async def handle_dapr_envelope(self, envelope: dict[str, object]) -> bool:
         data = envelope.get("data")

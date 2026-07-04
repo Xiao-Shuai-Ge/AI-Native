@@ -13,7 +13,7 @@ from uuid import UUID
 from agents.analyst import AnalystAgent
 from agents.planner import PlannerAgent
 from agents.researcher import ResearcherAgent
-from agents.roles import ROLE_REGISTRY
+from agents.roles import ROLE_REGISTRY, RoleConfig
 from agents.writer import WriterAgent
 from llm.protocol import LLMClient
 from orchestration.langgraph_engine.state import (
@@ -42,13 +42,18 @@ async def plan_node(state: GraphState, *, llm: LLMClient) -> dict[str, Any]:
     }
 
 
-async def select_roles_node(state: GraphState) -> dict[str, Any]:
+async def select_roles_node(
+    state: GraphState,
+    *,
+    role_registry: dict[str, RoleConfig] | None = None,
+) -> dict[str, Any]:
     """Pure state transform: normalize the planner's role selection.
 
     No LLM/network/DB call happens here; this only enforces the fixed role
     registry and guarantees `writer` always runs so a report is produced.
     """
-    requested = [role for role in state.get("assigned_roles", []) if role in ROLE_REGISTRY]
+    registry = role_registry or ROLE_REGISTRY
+    requested = [role for role in state.get("assigned_roles", []) if role in registry]
     if not requested:
         requested = list(_DEFAULT_ROLE_SUBSET)
     if "writer" not in requested:
@@ -59,7 +64,13 @@ async def select_roles_node(state: GraphState) -> dict[str, Any]:
     }
 
 
-async def researcher_node(state: GraphState, *, llm: LLMClient) -> dict[str, Any]:
+async def researcher_node(
+    state: GraphState,
+    *,
+    llm: LLMClient,
+    role_registry: dict[str, RoleConfig] | None = None,
+) -> dict[str, Any]:
+    registry = role_registry or ROLE_REGISTRY
     researcher = ResearcherAgent()
     plan = state.get("plan") or {}
     result = await researcher.research(
@@ -67,6 +78,7 @@ async def researcher_node(state: GraphState, *, llm: LLMClient) -> dict[str, Any
         task_id=UUID(state["task_id"]),
         llm=llm,
         subtask=plan.get("researcher"),
+        role=registry.get("researcher"),
     )
     return {
         "research_notes": list(result.notes),
@@ -75,7 +87,13 @@ async def researcher_node(state: GraphState, *, llm: LLMClient) -> dict[str, Any
     }
 
 
-async def analyst_node(state: GraphState, *, llm: LLMClient) -> dict[str, Any]:
+async def analyst_node(
+    state: GraphState,
+    *,
+    llm: LLMClient,
+    role_registry: dict[str, RoleConfig] | None = None,
+) -> dict[str, Any]:
+    registry = role_registry or ROLE_REGISTRY
     analyst = AnalystAgent()
     plan = state.get("plan") or {}
     result = await analyst.analyze(
@@ -84,6 +102,7 @@ async def analyst_node(state: GraphState, *, llm: LLMClient) -> dict[str, Any]:
         llm=llm,
         research_notes=list(state.get("research_notes", [])),
         subtask=plan.get("analyst"),
+        role=registry.get("analyst"),
     )
     return {
         "analysis": result.analysis,
@@ -91,7 +110,13 @@ async def analyst_node(state: GraphState, *, llm: LLMClient) -> dict[str, Any]:
     }
 
 
-async def writer_node(state: GraphState, *, llm: LLMClient) -> dict[str, Any]:
+async def writer_node(
+    state: GraphState,
+    *,
+    llm: LLMClient,
+    role_registry: dict[str, RoleConfig] | None = None,
+) -> dict[str, Any]:
+    registry = role_registry or ROLE_REGISTRY
     writer = WriterAgent()
     result = await writer.summarize(
         state["user_query"],
@@ -99,6 +124,7 @@ async def writer_node(state: GraphState, *, llm: LLMClient) -> dict[str, Any]:
         llm=llm,
         research_notes=list(state.get("research_notes", [])),
         analysis=state.get("analysis"),
+        role=registry.get("writer"),
     )
     return {
         "report": result.markdown,

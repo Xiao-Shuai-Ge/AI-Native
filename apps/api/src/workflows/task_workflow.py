@@ -31,6 +31,7 @@ from workflows.models import (
     DelayedStepInput,
     FinalizeTaskInput,
     LangGraphStepInput,
+    LangGraphStepResult,
     StepActivityInput,
     TaskFailureInput,
     TaskWorkflowInput,
@@ -67,7 +68,9 @@ def task_orchestration(
                 input=langgraph_input,
                 retry_policy=LANGGRAPH_STEP_RETRY,
             )
-            report = langgraph_result.report
+            # Dapr deserializes activity outputs as plain dicts inside the workflow.
+            parsed = LangGraphStepResult.model_validate(langgraph_result)
+            report = parsed.report
         else:
             # `auto`/`crewai` engines are not yet implemented; keep the stub
             # step sequence so Day 1-4 behavior and tests stay unaffected.

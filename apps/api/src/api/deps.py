@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from api.config import Settings
+from events.broadcaster import TaskEventBroadcaster
 from events.handler import AgentTaskEventHandler
 from events.schemas import AgentTaskEventPublisher
 from persistence.dapr_client import DaprHttpClient
@@ -26,6 +27,7 @@ class AppState:
     session_store: SessionStore
     event_publisher: AgentTaskEventPublisher
     event_handler: AgentTaskEventHandler
+    event_broadcaster: TaskEventBroadcaster
     workflow_scheduler: WorkflowScheduler
 
 
@@ -33,6 +35,7 @@ def build_app_state(settings: Settings) -> AppState:
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
     dapr_client = DaprHttpClient(http_port=settings.dapr_http_port)
+    event_broadcaster = TaskEventBroadcaster()
     return AppState(
         settings=settings,
         engine=engine,
@@ -41,7 +44,11 @@ def build_app_state(settings: Settings) -> AppState:
         dapr_state=DaprStateStore(dapr_client),
         session_store=SessionStore.from_settings(settings),
         event_publisher=AgentTaskEventPublisher(dapr_client),
-        event_handler=AgentTaskEventHandler(session_factory),
+        event_handler=AgentTaskEventHandler(
+            session_factory,
+            broadcaster=event_broadcaster,
+        ),
+        event_broadcaster=event_broadcaster,
         workflow_scheduler=WorkflowScheduler(
             grpc_host=settings.workflow_dapr_grpc_host,
             grpc_port=settings.workflow_dapr_grpc_port or settings.dapr_grpc_port,

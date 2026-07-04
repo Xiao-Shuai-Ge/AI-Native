@@ -14,6 +14,7 @@ def create_openai_client(
     base_url: str,
     model: str,
     http_client: httpx.AsyncClient | None = None,
+    extra_body: dict[str, object] | None = None,
 ) -> OpenAICompatibleClient:
     return OpenAICompatibleClient(
         provider="openai",
@@ -27,4 +28,5 @@ def create_openai_client(
             max_context_tokens=128000,
         ),
         http_client=http_client,
+        extra_body=extra_body,
     )

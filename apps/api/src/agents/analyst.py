@@ -5,7 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from agents.prompts import build_analyst_system_prompt
-from agents.roles import ANALYST_ROLE
+from agents.roles import ANALYST_ROLE, RoleConfig
 from agents.schemas import AnalystSummary
 from llm.protocol import ChatMessage, ChatRole, LLMClient
 
@@ -19,6 +19,7 @@ class AnalystAgent:
         llm: LLMClient,
         research_notes: list[str] | None = None,
         subtask: str | None = None,
+        role: RoleConfig | None = None,
     ) -> AnalystSummary:
         user_content = f"User query: {user_query}"
         if subtask:
@@ -26,10 +27,11 @@ class AnalystAgent:
         if research_notes:
             joined_notes = "\n".join(f"- {note}" for note in research_notes)
             user_content += f"\nResearch notes:\n{joined_notes}"
+        role_config = role or ANALYST_ROLE
         messages = [
             ChatMessage(
                 role=ChatRole.SYSTEM,
-                content=build_analyst_system_prompt(ANALYST_ROLE),
+                content=build_analyst_system_prompt(role_config),
             ),
             ChatMessage(role=ChatRole.USER, content=user_content),
         ]

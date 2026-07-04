@@ -21,6 +21,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from agents.roles import ROLE_REGISTRY, RoleConfig
 from llm.protocol import LLMClient
 from orchestration.langgraph_engine.nodes import (
     analyst_node,
@@ -91,7 +92,9 @@ def build_graph(
     checkpointer: BaseCheckpointSaver[Any],
     on_node_complete: NodeEventCallback | None = None,
     persist_result: ResultPersister | None = None,
+    role_registry: dict[str, RoleConfig] | None = None,
 ) -> CompiledStateGraph[GraphState, None, GraphState, GraphState]:
+    registry = role_registry or ROLE_REGISTRY
     graph: StateGraph[GraphState] = StateGraph(GraphState)
 
     # `add_node`'s overloaded signature does not model plain async callables
@@ -102,19 +105,35 @@ def build_graph(
     )
     graph.add_node(  # type: ignore[call-overload]
         STEP_SELECT_ROLES,
-        _with_event(STEP_SELECT_ROLES, select_roles_node, on_node_complete),
+        _with_event(
+            STEP_SELECT_ROLES,
+            functools.partial(select_roles_node, role_registry=registry),
+            on_node_complete,
+        ),
     )
     graph.add_node(  # type: ignore[call-overload]
         STEP_RESEARCHER,
-        _with_event(STEP_RESEARCHER, functools.partial(researcher_node, llm=llm), on_node_complete),
+        _with_event(
+            STEP_RESEARCHER,
+            functools.partial(researcher_node, llm=llm, role_registry=registry),
+            on_node_complete,
+        ),
     )
     graph.add_node(  # type: ignore[call-overload]
         STEP_ANALYST,
-        _with_event(STEP_ANALYST, functools.partial(analyst_node, llm=llm), on_node_complete),
+        _with_event(
+            STEP_ANALYST,
+            functools.partial(analyst_node, llm=llm, role_registry=registry),
+            on_node_complete,
+        ),
     )
     graph.add_node(  # type: ignore[call-overload]
         STEP_WRITER,
-        _with_event(STEP_WRITER, functools.partial(writer_node, llm=llm), on_node_complete),
+        _with_event(
+            STEP_WRITER,
+            functools.partial(writer_node, llm=llm, role_registry=registry),
+            on_node_complete,
+        ),
     )
 
     async def persist_result_node(state: GraphState) -> dict[str, Any]:

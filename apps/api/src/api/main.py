@@ -12,6 +12,7 @@ from api.routes.dev_writer import router as dev_writer_router
 from api.routes.health import router as health_router
 from api.routes.preferences import router as preferences_router
 from api.routes.providers import router as providers_router
+from api.routes.settings import router as settings_router
 from api.routes.tasks import router as tasks_router
 
 
@@ -33,6 +34,7 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(dev_writer_router)
 app.include_router(providers_router)
+app.include_router(settings_router)
 app.include_router(tasks_router)
 app.include_router(preferences_router)
 app.include_router(dapr_router)

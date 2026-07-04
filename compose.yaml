@@ -121,6 +121,18 @@ services:
       - ./dapr/components/pubsub.yaml:/components/pubsub.yaml:ro
       - ./dapr/config:/config:ro
 
+  web:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.web
+    container_name: ainative-web
+    ports:
+      - "${WEB_PORT:-5173}:80"
+    depends_on:
+      - api
+    networks:
+      - ainative
+
   worker:
     build:
       context: .

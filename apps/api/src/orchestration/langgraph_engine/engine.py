@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from agents.roles import RoleConfig
 from llm.protocol import LLMClient
 from orchestration.langgraph_engine.graph import build_graph
 from orchestration.langgraph_engine.ports import NodeEventCallback, ResultPersister
@@ -29,12 +30,14 @@ class LangGraphEngine:
         checkpointer: BaseCheckpointSaver[str],
         on_node_complete: NodeEventCallback | None = None,
         persist_result: ResultPersister | None = None,
+        role_registry: dict[str, RoleConfig] | None = None,
     ) -> None:
         self._graph = build_graph(
             llm=llm,
             checkpointer=checkpointer,
             on_node_complete=on_node_complete,
             persist_result=persist_result,
+            role_registry=role_registry,
         )
 
     async def run(self, request: TaskRequest) -> TaskResult:

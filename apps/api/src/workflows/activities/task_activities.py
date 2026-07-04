@@ -10,7 +10,9 @@ from uuid import UUID
 from dapr.ext.workflow import WorkflowActivityContext
 from sqlalchemy import select
 
+from api.services.settings_service import SettingsService
 from events.schemas import AgentTaskEvent
+from llm.factory import create_llm_client
 from orchestration.langgraph_engine.engine import LangGraphEngine
 from orchestration.models import EngineChoice, TaskRequest, TaskState, TaskStatus
 from persistence.checkpointer import DaprCheckpointSaver
@@ -35,7 +37,7 @@ from workflows.models import (
     TaskFailureInput,
     TaskWorkflowInput,
 )
-from workflows.sync_runtime import get_activity_llm_client, get_activity_runtime
+from workflows.sync_runtime import get_activity_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -237,12 +239,16 @@ async def _run_langgraph_graph_impl(step_input: LangGraphStepInput) -> LangGraph
         raise RuntimeError(msg)
 
     checkpointer = DaprCheckpointSaver(runtime.dapr_client)
-    llm = runtime.llm_client or get_activity_llm_client()
+    settings_service = SettingsService(runtime.dapr_client, runtime.settings)
+    runtime_settings = await settings_service.get_settings()
+    role_registry = settings_service.role_registry_from_settings(runtime_settings)
+    llm = create_llm_client(runtime.settings, runtime_llm=runtime_settings.llm)
     engine = LangGraphEngine(
         llm=llm,
         checkpointer=checkpointer,
         on_node_complete=on_node_complete,
         persist_result=persist_result,
+        role_registry=role_registry,
     )
 
     existing_checkpoint = await checkpointer.aget_tuple(
