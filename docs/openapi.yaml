@@ -1,0 +1,787 @@
+openapi: 3.0.3
+info:
+  title: AI Native API
+  description: 'AI Native 多智能体协作平台 API（Day 3 交付）。
+
+
+    已实现：健康检查、LLM 供应商查询、Writer 单 Agent 演示、任务 CRUD、用户偏好、Dapr Pub/Sub 订阅端点。
+
+
+    Base URL 默认：http://localhost:8000
+
+    启动：docker compose up -d --build api api-daprd'
+  version: 0.2.0
+paths:
+  /health:
+    get:
+      tags:
+      - health
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /ready:
+    get:
+      tags:
+      - health
+      summary: Ready
+      operationId: ready_ready_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+  /api/dev/writer/summarize:
+    post:
+      tags:
+      - dev-writer
+      summary: Summarize Topic
+      operationId: summarize_topic_api_dev_writer_summarize_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WriterSummarizeRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WriterSummarizeResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/providers:
+    get:
+      tags:
+      - providers
+      summary: Get Providers
+      operationId: get_providers_api_providers_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMProviderInfo'
+  /api/tasks:
+    post:
+      tags:
+      - tasks
+      summary: Create Task
+      operationId: create_task_api_tasks_post
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateTaskResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    get:
+      tags:
+      - tasks
+      summary: List Tasks
+      operationId: list_tasks_api_tasks_get
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 200
+          minimum: 1
+          default: 50
+          title: Limit
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+          title: Offset
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TaskSummaryResponse'
+                title: Response List Tasks Api Tasks Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/tasks/{task_id}:
+    get:
+      tags:
+      - tasks
+      summary: Get Task
+      operationId: get_task_api_tasks__task_id__get
+      parameters:
+      - name: task_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Task Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetailResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/users/{user_id}/preferences:
+    get:
+      tags:
+      - users
+      summary: Get User Preferences
+      operationId: get_user_preferences_api_users__user_id__preferences_get
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPreferencesResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    put:
+      tags:
+      - users
+      summary: Update User Preferences
+      operationId: update_user_preferences_api_users__user_id__preferences_put
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserPreferencesRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserPreferencesResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /dapr/subscribe:
+    get:
+      tags:
+      - dapr
+      summary: Dapr Subscribe
+      operationId: dapr_subscribe_dapr_subscribe_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  additionalProperties:
+                    type: string
+                  type: object
+                type: array
+                title: Response Dapr Subscribe Dapr Subscribe Get
+  /dapr/agent-task-events:
+    post:
+      tags:
+      - dapr
+      summary: Handle Agent Task Event
+      operationId: handle_agent_task_event_dapr_agent_task_events_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+  /metrics:
+    get:
+      summary: Metrics
+      description: Prometheus metrics stub for Day 1.
+      operationId: metrics_metrics_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+components:
+  schemas:
+    AuditEventResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        engine:
+          type: string
+          title: Engine
+        step:
+          type: string
+          title: Step
+        status:
+          type: string
+          title: Status
+        payload:
+          additionalProperties: true
+          type: object
+          title: Payload
+        event_time:
+          type: string
+          format: date-time
+          title: Event Time
+      type: object
+      required:
+      - id
+      - engine
+      - step
+      - status
+      - payload
+      - event_time
+      title: AuditEventResponse
+    CreateTaskRequest:
+      properties:
+        task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Task Id
+        session_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Session Id
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+        user_query:
+          type: string
+          minLength: 1
+          title: User Query
+        engine:
+          $ref: '#/components/schemas/EngineChoice'
+          default: auto
+      type: object
+      required:
+      - user_query
+      title: CreateTaskRequest
+    CreateTaskResponse:
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        session_id:
+          type: string
+          format: uuid
+          title: Session Id
+        workflow_id:
+          type: string
+          title: Workflow Id
+        thread_id:
+          type: string
+          title: Thread Id
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        engine_requested:
+          $ref: '#/components/schemas/EngineChoice'
+        user_preferences:
+          additionalProperties: true
+          type: object
+          title: User Preferences
+        session_context:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Session Context
+      type: object
+      required:
+      - task_id
+      - session_id
+      - workflow_id
+      - thread_id
+      - status
+      - engine_requested
+      title: CreateTaskResponse
+    EngineChoice:
+      type: string
+      enum:
+      - auto
+      - langgraph
+      - crewai
+      title: EngineChoice
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    HealthResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+      type: object
+      required:
+      - status
+      title: HealthResponse
+    LLMCapabilities:
+      properties:
+        supports_streaming:
+          type: boolean
+          title: Supports Streaming
+          default: false
+        supports_tools:
+          type: boolean
+          title: Supports Tools
+          default: false
+        supports_structured_output:
+          type: boolean
+          title: Supports Structured Output
+          default: false
+        max_context_tokens:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Context Tokens
+      type: object
+      title: LLMCapabilities
+    LLMProviderInfo:
+      properties:
+        provider:
+          type: string
+          title: Provider
+        model:
+          type: string
+          title: Model
+        capabilities:
+          $ref: '#/components/schemas/LLMCapabilities'
+      type: object
+      required:
+      - provider
+      - model
+      title: LLMProviderInfo
+    ReadinessResponse:
+      properties:
+        status:
+          type: string
+          title: Status
+        checks:
+          additionalProperties:
+            additionalProperties:
+              type: string
+            type: object
+          type: object
+          title: Checks
+      type: object
+      required:
+      - status
+      - checks
+      title: ReadinessResponse
+    TaskDetailResponse:
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        session_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Session Id
+        user_id:
+          type: string
+          title: User Id
+        user_query:
+          type: string
+          title: User Query
+        engine_requested:
+          type: string
+          title: Engine Requested
+        engine_selected:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Engine Selected
+        status:
+          type: string
+          title: Status
+        workflow_id:
+          type: string
+          title: Workflow Id
+        thread_id:
+          type: string
+          title: Thread Id
+        report:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Report
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+        engine_selection_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Engine Selection Reason
+        steps:
+          items:
+            $ref: '#/components/schemas/TaskStepResponse'
+          type: array
+          title: Steps
+        messages:
+          items:
+            $ref: '#/components/schemas/TaskMessageResponse'
+          type: array
+          title: Messages
+        audit_events:
+          items:
+            $ref: '#/components/schemas/AuditEventResponse'
+          type: array
+          title: Audit Events
+        runtime_state:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Runtime State
+        user_preferences:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: User Preferences
+        session_context:
+          anyOf:
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          - type: 'null'
+          title: Session Context
+      type: object
+      required:
+      - task_id
+      - session_id
+      - user_id
+      - user_query
+      - engine_requested
+      - status
+      - workflow_id
+      - thread_id
+      - created_at
+      - updated_at
+      title: TaskDetailResponse
+    TaskMessageResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        role:
+          type: string
+          title: Role
+        content:
+          type: string
+          title: Content
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - role
+      - content
+      - created_at
+      title: TaskMessageResponse
+    TaskStatus:
+      type: string
+      enum:
+      - queued
+      - running
+      - paused
+      - succeeded
+      - failed
+      - cancelled
+      title: TaskStatus
+    TaskStepResponse:
+      properties:
+        id:
+          type: string
+          format: uuid
+          title: Id
+        step_name:
+          type: string
+          title: Step Name
+        status:
+          type: string
+          title: Status
+        output_json:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Output Json
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+      type: object
+      required:
+      - id
+      - step_name
+      - status
+      - created_at
+      title: TaskStepResponse
+    TaskSummaryResponse:
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        session_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Session Id
+        user_id:
+          type: string
+          title: User Id
+        user_query:
+          type: string
+          title: User Query
+        engine_requested:
+          type: string
+          title: Engine Requested
+        engine_selected:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Engine Selected
+        status:
+          type: string
+          title: Status
+        workflow_id:
+          type: string
+          title: Workflow Id
+        thread_id:
+          type: string
+          title: Thread Id
+        report:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Report
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          type: string
+          format: date-time
+          title: Updated At
+      type: object
+      required:
+      - task_id
+      - session_id
+      - user_id
+      - user_query
+      - engine_requested
+      - status
+      - workflow_id
+      - thread_id
+      - created_at
+      - updated_at
+      title: TaskSummaryResponse
+    UpdateUserPreferencesRequest:
+      properties:
+        preferences:
+          additionalProperties: true
+          type: object
+          title: Preferences
+      type: object
+      title: UpdateUserPreferencesRequest
+    UserPreferencesResponse:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+        preferences:
+          additionalProperties: true
+          type: object
+          title: Preferences
+      type: object
+      required:
+      - user_id
+      title: UserPreferencesResponse
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    WriterSummarizeRequest:
+      properties:
+        topic:
+          type: string
+          minLength: 1
+          title: Topic
+        task_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Task Id
+      type: object
+      required:
+      - topic
+      title: WriterSummarizeRequest
+    WriterSummarizeResponse:
+      properties:
+        task_id:
+          type: string
+          format: uuid
+          title: Task Id
+        result:
+          $ref: '#/components/schemas/WriterSummary'
+      type: object
+      required:
+      - task_id
+      - result
+      title: WriterSummarizeResponse
+    WriterSummary:
+      properties:
+        title:
+          type: string
+          minLength: 1
+          title: Title
+        summary:
+          type: string
+          minLength: 1
+          title: Summary
+        markdown:
+          type: string
+          minLength: 1
+          title: Markdown
+      type: object
+      required:
+      - title
+      - summary
+      - markdown
+      title: WriterSummary
+      description: Structured writer output for topic summaries.
+servers:
+- url: http://localhost:8000
+  description: 本地 Compose（api + daprd）
+- url: http://127.0.0.1:8000
+  description: 本地直连
+tags:
+- name: health
+  description: 存活与就绪检查
+- name: providers
+  description: LLM 供应商与能力
+- name: dev-writer
+  description: Day 2 Writer 单 Agent 开发演示
+- name: tasks
+  description: Day 3 任务创建与查询
+- name: users
+  description: Day 3 用户结构化偏好
+- name: dapr
+  description: Dapr sidecar 订阅（通常由 sidecar 自动调用）

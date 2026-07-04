@@ -35,6 +35,7 @@ class ToolCallRecord(BaseModel):
 class TaskRequest(BaseModel):
     task_id: UUID | None = None
     session_id: UUID | None = None
+    user_id: str | None = None
     user_query: str
     engine: EngineChoice = EngineChoice.AUTO
 

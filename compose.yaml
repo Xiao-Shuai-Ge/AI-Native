@@ -57,6 +57,60 @@ services:
     networks:
       - ainative
 
+  api:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    container_name: ainative-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-ainative}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ainative}
+      POSTGRES_DB: ${POSTGRES_DB:-ainative}
+      DAPR_HTTP_PORT: 3500
+      DAPR_GRPC_PORT: 50001
+      LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - ainative
+
+  api-daprd:
+    image: daprio/daprd:1.15.0
+    container_name: ainative-api-daprd
+    network_mode: "service:api"
+    depends_on:
+      - api
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "api"
+      - "-app-port"
+      - "8000"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+      - "-config"
+      - "/config/config.yaml"
+    volumes:
+      - ./dapr/components/statestore.yaml:/components/statestore.yaml:ro
+      - ./dapr/components/pubsub.yaml:/components/pubsub.yaml:ro
+      - ./dapr/config:/config:ro
+
 networks:
   ainative:
     name: ainative

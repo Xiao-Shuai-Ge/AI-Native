@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 import asyncpg
+import httpx
 import redis.asyncio as aioredis
 
 from api.config import Settings
@@ -50,10 +51,16 @@ async def check_postgres(settings: Settings) -> dict[str, Any]:
 
 
 async def check_dapr(settings: Settings) -> dict[str, Any]:
-    return {
-        "status": "skipped",
-        "detail": f"Dapr sidecar check deferred until Day 3 (port {settings.dapr_http_port})",
-    }
+    url = f"http://127.0.0.1:{settings.dapr_http_port}/v1.0/healthz"
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(url)
+            if response.status_code == 204:
+                return {"status": "ok"}
+            return {"status": "error", "detail": f"unexpected status {response.status_code}"}
+    except Exception as exc:
+        logger.warning("dapr readiness check failed", extra={"error": str(exc)})
+        return {"status": "error", "detail": str(exc)}
 
 
 async def check_mcp(settings: Settings) -> dict[str, Any]:
