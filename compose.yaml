@@ -1,0 +1,66 @@
+name: ainative
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: ainative-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - ainative
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ainative-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ainative}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ainative}
+      POSTGRES_DB: ${POSTGRES_DB:-ainative}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ainative
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ainative} -d ${POSTGRES_DB:-ainative}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.64.0
+    container_name: ainative-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+    networks:
+      - ainative
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: ainative-prometheus
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - ainative
+
+networks:
+  ainative:
+    name: ainative
+
+volumes:
+  redis_data:
+  postgres_data:

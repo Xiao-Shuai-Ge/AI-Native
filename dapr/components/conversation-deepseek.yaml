@@ -1,0 +1,12 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: conversation-deepseek
+spec:
+  type: conversation.deepseek
+  version: v1
+  metadata:
+    - name: key
+      secretKeyRef:
+        name: deepseek-api-key
+        key: key

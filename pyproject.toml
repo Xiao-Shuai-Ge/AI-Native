@@ -1,0 +1,55 @@
+[project]
+name = "ai-native"
+version = "0.1.0"
+description = "AI Native multi-agent collaboration platform"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "api",
+    "mcp-server",
+]
+
+[tool.uv.sources]
+api = { workspace = true }
+mcp-server = { workspace = true }
+
+[tool.uv.workspace]
+members = ["apps/api", "apps/mcp-server"]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["apps/api/src", "apps/mcp-server/src", "apps/api/tests", "apps/mcp-server/tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+mypy_path = "apps/api/src:apps/mcp-server/src"
+namespace_packages = true
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = ["redis.*", "asyncpg.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["apps/api/tests", "apps/mcp-server/tests"]
+markers = [
+    "integration: tests requiring docker compose services",
+]
