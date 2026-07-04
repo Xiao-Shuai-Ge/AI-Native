@@ -123,6 +123,7 @@ class CrewAIWriterInput(BaseModel):
     engine: str
     research_notes: list[str] = Field(default_factory=list)
     analysis: str | None = None
+    subtask: str | None = None
 
 
 class CrewAIWriterResult(BaseModel):

@@ -9,6 +9,7 @@ instead of the whole Crew (AGENTS.md section 9).
 
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 from crewai import Crew, Process
@@ -31,7 +32,12 @@ async def _run_single_task_crew(
     llm: LLMClient,
     task_id: UUID,
 ) -> str:
-    bridge = CrewAILLMBridge(llm_client=llm, task_id=str(task_id))
+    loop = asyncio.get_running_loop()
+    bridge = CrewAILLMBridge(
+        llm_client=llm,
+        task_id=str(task_id),
+        async_loop=loop,
+    )
     agent = build_agent(role, bridge)
     task = build_task(role=role, agent=agent, description_body=description_body, schema=schema)
     crew = Crew(agents=[agent], tasks=[task], process=Process.sequential, verbose=False)
@@ -95,6 +101,7 @@ async def run_writer(
     llm: LLMClient,
     research_notes: list[str],
     analysis: str | None,
+    subtask: str | None = None,
     role: RoleConfig | None = None,
 ) -> WriterSummary:
     role_config = role or WRITER_ROLE
@@ -103,6 +110,8 @@ async def run_writer(
         f"User query: {user_query}\nResearch notes:\n{notes_block}\n"
         f"Analysis:\n{analysis or '(no analysis)'}"
     )
+    if subtask:
+        description += f"\nSubtask: {subtask}"
     raw = await _run_single_task_crew(
         role=role_config,
         description_body=description,

@@ -175,6 +175,53 @@ async def test_run_crewai_researcher_executes_and_records_step(
 
 
 @pytest.mark.asyncio
+async def test_run_crewai_researcher_uses_peer_output_when_persist_loses_race(
+    activity_runtime: ActivityRuntime,
+) -> None:
+    step_input = CrewAIResearcherInput(
+        task_id=uuid4(),
+        session_id=uuid4(),
+        user_id="user-1",
+        user_query="What is Dapr Workflow?",
+        engine="crewai",
+    )
+    fake_llm = _fake_llm_for_schema(
+        {"ResearcherNotes": {"notes": ["local note"], "sources": []}},
+    )
+    mock_repo = AsyncMock()
+    mock_repo.record_step.return_value = None
+
+    load_attempt = 0
+    session = activity_runtime.session_factory.return_value.__aenter__.return_value  # type: ignore[attr-defined]
+
+    def execute_side_effect(*_args: object, **_kwargs: object) -> MagicMock:
+        nonlocal load_attempt
+        load_attempt += 1
+        result = MagicMock()
+        if load_attempt >= 3:
+            cached = MagicMock()
+            cached.output_json = {"notes": ["peer note"], "sources": []}
+            result.scalar_one_or_none.return_value = cached
+        else:
+            result.scalar_one_or_none.return_value = None
+        return result
+
+    session.execute.side_effect = execute_side_effect
+
+    with (
+        patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo),
+        patch(
+            "workflows.activities.task_activities.create_llm_client",
+            return_value=fake_llm,
+        ),
+    ):
+        result = await _run_crewai_researcher_impl(step_input)
+
+    assert result.notes == ["peer note"]
+    activity_runtime.event_publisher.publish.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_run_crewai_analyst_executes_and_records_step(
     activity_runtime: ActivityRuntime,
 ) -> None:
@@ -242,3 +289,44 @@ async def test_run_crewai_writer_executes_records_and_updates_report(
     assert result.report == "# T\n\nS"
     mock_repo.record_step.assert_awaited_once()
     activity_runtime.dapr_state.merge_task_runtime_state.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_run_crewai_writer_forwards_subtask_to_role_prompt(
+    activity_runtime: ActivityRuntime,
+) -> None:
+    step_input = CrewAIWriterInput(
+        task_id=uuid4(),
+        session_id=uuid4(),
+        user_id="user-1",
+        user_query="What is Dapr Workflow?",
+        engine="crewai",
+        research_notes=["note a"],
+        analysis="synthesized analysis",
+        subtask="write an executive summary",
+    )
+    seen_prompts: list[str] = []
+
+    def handler(messages: list[ChatMessage]) -> ChatResponse:
+        content = " ".join(message.content for message in messages)
+        seen_prompts.append(content)
+        payload = {
+            "title": "T",
+            "summary": "S",
+            "markdown": "# T\n\nS",
+        }
+        return ChatResponse(content=json.dumps(payload), model="fake-model")
+
+    mock_repo = AsyncMock()
+
+    with (
+        patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo),
+        patch(
+            "workflows.activities.task_activities.create_llm_client",
+            return_value=FakeLLMClient(chat_handler=handler),
+        ),
+    ):
+        await _run_crewai_writer_impl(step_input)
+
+    assert seen_prompts
+    assert "Subtask: write an executive summary" in seen_prompts[0]

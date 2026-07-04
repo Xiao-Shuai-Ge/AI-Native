@@ -11,6 +11,7 @@ from uuid import UUID
 from dapr.ext.workflow import WorkflowActivityContext
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from api.services.settings_service import SettingsService
 from events.schemas import AgentTaskEvent
@@ -132,6 +133,83 @@ async def _step_exists(task_id: UUID, idempotency_key: str) -> bool:
             select(TaskStepRecord).where(TaskStepRecord.idempotency_key == idempotency_key)
         )
         return result.scalar_one_or_none() is not None
+
+
+async def _load_recorded_step_output[TModel: BaseModel](
+    idempotency_key: str,
+    result_type: type[TModel],
+) -> TModel | None:
+    runtime = get_activity_runtime()
+    async with runtime.session_factory() as session:
+        existing = await session.execute(
+            select(TaskStepRecord).where(TaskStepRecord.idempotency_key == idempotency_key)
+        )
+        record = existing.scalar_one_or_none()
+        if record is not None and record.output_json is not None:
+            return result_type.model_validate(record.output_json)
+    return None
+
+
+async def _commit_crewai_step[TModel: BaseModel](
+    *,
+    task_id: UUID,
+    step_name: str,
+    engine: str,
+    idempotency_key: str,
+    result: TModel,
+    result_type: type[TModel],
+    report: str | None = None,
+) -> TModel:
+    """Persist CrewAI role output and return the canonical stored result."""
+    cached = await _load_recorded_step_output(idempotency_key, result_type)
+    if cached is not None:
+        logger.info(
+            "crewai step already recorded, skipping side effects",
+            extra={"task_id": str(task_id), "step_name": step_name},
+        )
+        return cached
+
+    runtime = get_activity_runtime()
+    async with runtime.session_factory() as session:
+        repo = TaskRepository(session)
+        record = await repo.record_step(
+            task_id=task_id,
+            step_name=step_name,
+            status="completed",
+            output_json=result.model_dump(),
+            idempotency_key=idempotency_key,
+        )
+        if record is not None:
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+            else:
+                await _publish_event(
+                    task_id=task_id,
+                    engine=engine,
+                    step=step_name,
+                    status="completed",
+                    detail=f"{step_name} finished",
+                )
+                await _update_runtime_state(
+                    task_id,
+                    TaskStatus.RUNNING,
+                    current_step=step_name,
+                    report=report,
+                )
+                return result
+
+    cached = await _load_recorded_step_output(idempotency_key, result_type)
+    if cached is not None:
+        logger.info(
+            "crewai step persisted by peer, using stored output",
+            extra={"task_id": str(task_id), "step_name": step_name},
+        )
+        return cached
+
+    msg = f"failed to persist or load crewai step output: {step_name}"
+    raise RuntimeError(msg)
 
 
 async def _initialize_task_impl(wf_input: TaskWorkflowInput) -> InitializeTaskResult:
@@ -375,13 +453,9 @@ async def _run_crewai_researcher_impl(
     step_name = "researcher"
     idempotency_key = step_idempotency_key(task_id, step_name, "crewai")
 
-    async with runtime.session_factory() as session:
-        existing = await session.execute(
-            select(TaskStepRecord).where(TaskStepRecord.idempotency_key == idempotency_key)
-        )
-        record = existing.scalar_one_or_none()
-        if record is not None and record.output_json is not None:
-            return CrewAIResearcherResult.model_validate(record.output_json)
+    cached = await _load_recorded_step_output(idempotency_key, CrewAIResearcherResult)
+    if cached is not None:
+        return cached
 
     settings_service = SettingsService(_require_dapr_client(runtime), runtime.settings)
     runtime_settings = await settings_service.get_settings()
@@ -399,26 +473,14 @@ async def _run_crewai_researcher_impl(
         notes=list(notes_result.notes),
         sources=list(notes_result.sources),
     )
-
-    await _publish_event(
+    return await _commit_crewai_step(
         task_id=task_id,
+        step_name=step_name,
         engine=step_input.engine,
-        step=step_name,
-        status="completed",
-        detail=f"{step_name} finished",
+        idempotency_key=idempotency_key,
+        result=result,
+        result_type=CrewAIResearcherResult,
     )
-    async with runtime.session_factory() as session:
-        repo = TaskRepository(session)
-        await repo.record_step(
-            task_id=task_id,
-            step_name=step_name,
-            status="completed",
-            output_json=result.model_dump(),
-            idempotency_key=idempotency_key,
-        )
-        await session.commit()
-    await _update_runtime_state(task_id, TaskStatus.RUNNING, current_step=step_name)
-    return result
 
 
 def run_crewai_researcher(
@@ -437,13 +499,9 @@ async def _run_crewai_analyst_impl(step_input: CrewAIAnalystInput) -> CrewAIAnal
     step_name = "analyst"
     idempotency_key = step_idempotency_key(task_id, step_name, "crewai")
 
-    async with runtime.session_factory() as session:
-        existing = await session.execute(
-            select(TaskStepRecord).where(TaskStepRecord.idempotency_key == idempotency_key)
-        )
-        record = existing.scalar_one_or_none()
-        if record is not None and record.output_json is not None:
-            return CrewAIAnalystResult.model_validate(record.output_json)
+    cached = await _load_recorded_step_output(idempotency_key, CrewAIAnalystResult)
+    if cached is not None:
+        return cached
 
     settings_service = SettingsService(_require_dapr_client(runtime), runtime.settings)
     runtime_settings = await settings_service.get_settings()
@@ -459,26 +517,14 @@ async def _run_crewai_analyst_impl(step_input: CrewAIAnalystInput) -> CrewAIAnal
         role=role_registry.get("analyst"),
     )
     result = CrewAIAnalystResult(analysis=analysis_result.analysis)
-
-    await _publish_event(
+    return await _commit_crewai_step(
         task_id=task_id,
+        step_name=step_name,
         engine=step_input.engine,
-        step=step_name,
-        status="completed",
-        detail=f"{step_name} finished",
+        idempotency_key=idempotency_key,
+        result=result,
+        result_type=CrewAIAnalystResult,
     )
-    async with runtime.session_factory() as session:
-        repo = TaskRepository(session)
-        await repo.record_step(
-            task_id=task_id,
-            step_name=step_name,
-            status="completed",
-            output_json=result.model_dump(),
-            idempotency_key=idempotency_key,
-        )
-        await session.commit()
-    await _update_runtime_state(task_id, TaskStatus.RUNNING, current_step=step_name)
-    return result
 
 
 def run_crewai_analyst(
@@ -497,13 +543,9 @@ async def _run_crewai_writer_impl(step_input: CrewAIWriterInput) -> CrewAIWriter
     step_name = "writer"
     idempotency_key = step_idempotency_key(task_id, step_name, "crewai")
 
-    async with runtime.session_factory() as session:
-        existing = await session.execute(
-            select(TaskStepRecord).where(TaskStepRecord.idempotency_key == idempotency_key)
-        )
-        record = existing.scalar_one_or_none()
-        if record is not None and record.output_json is not None:
-            return CrewAIWriterResult.model_validate(record.output_json)
+    cached = await _load_recorded_step_output(idempotency_key, CrewAIWriterResult)
+    if cached is not None:
+        return cached
 
     settings_service = SettingsService(_require_dapr_client(runtime), runtime.settings)
     runtime_settings = await settings_service.get_settings()
@@ -516,34 +558,19 @@ async def _run_crewai_writer_impl(step_input: CrewAIWriterInput) -> CrewAIWriter
         llm=llm,
         research_notes=step_input.research_notes,
         analysis=step_input.analysis,
+        subtask=step_input.subtask,
         role=role_registry.get("writer"),
     )
     result = CrewAIWriterResult(report=writer_result.markdown)
-
-    await _publish_event(
+    return await _commit_crewai_step(
         task_id=task_id,
+        step_name=step_name,
         engine=step_input.engine,
-        step=step_name,
-        status="completed",
-        detail=f"{step_name} finished",
-    )
-    async with runtime.session_factory() as session:
-        repo = TaskRepository(session)
-        await repo.record_step(
-            task_id=task_id,
-            step_name=step_name,
-            status="completed",
-            output_json=result.model_dump(),
-            idempotency_key=idempotency_key,
-        )
-        await session.commit()
-    await _update_runtime_state(
-        task_id,
-        TaskStatus.RUNNING,
-        current_step=step_name,
+        idempotency_key=idempotency_key,
+        result=result,
+        result_type=CrewAIWriterResult,
         report=result.report,
     )
-    return result
 
 
 def run_crewai_writer(

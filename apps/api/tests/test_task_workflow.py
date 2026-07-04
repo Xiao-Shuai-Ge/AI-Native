@@ -197,6 +197,34 @@ def test_auto_engine_routes_to_crewai_and_forwards_router_subtasks() -> None:
     assert researcher_input.engine == "crewai"
 
 
+def test_auto_engine_forwards_writer_subtask() -> None:
+    ctx = MagicMock()
+    wf_input = _wf_input("auto")
+    gen = task_orchestration(ctx, wf_input)
+
+    with pytest.raises(StopIteration):
+        _drive(
+            gen,
+            [
+                {},
+                {
+                    "engine_selected": "crewai",
+                    "reason": "collaboration",
+                    "subtasks": {"writer": "draft executive summary"},
+                },
+                {"notes": [], "sources": []},
+                {"analysis": "n/a"},
+                {"report": "# Report"},
+                {},
+            ],
+        )
+
+    writer_input = CrewAIWriterInput.model_validate(
+        ctx.call_activity.call_args_list[4].kwargs["input"]
+    )
+    assert writer_input.subtask == "draft executive summary"
+
+
 def test_auto_engine_routes_to_langgraph() -> None:
     ctx = MagicMock()
     wf_input = _wf_input("auto")

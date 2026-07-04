@@ -149,6 +149,7 @@ def task_orchestration(
                 engine=resolved_engine,
                 research_notes=researcher_parsed.notes,
                 analysis=analyst_parsed.analysis,
+                subtask=subtasks.get("writer"),
             )
             writer_result = yield ctx.call_activity(
                 run_crewai_writer,
