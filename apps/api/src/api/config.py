@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         alias="OTEL_EXPORTER_OTLP_ENDPOINT",
     )
 
-    # Day 2 LLM settings (placeholders for Day 1)
+    # Day 2 LLM settings
     llm_provider: str = Field(default="deepseek", alias="LLM_PROVIDER")
     deepseek_api_key: str = Field(default="", alias="DEEPSEEK_API_KEY")
     deepseek_base_url: str = Field(
@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     openai_model: str = Field(default="gpt-4o-mini", alias="OPENAI_MODEL")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     anthropic_model: str = Field(default="claude-3-5-sonnet-latest", alias="ANTHROPIC_MODEL")
+    llm_timeout_seconds: float = Field(default=60.0, alias="LLM_TIMEOUT_SECONDS")
+    llm_max_retries: int = Field(default=1, alias="LLM_MAX_RETRIES")
 
     @property
     def redis_url(self) -> str:

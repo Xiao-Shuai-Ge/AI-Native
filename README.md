@@ -1,6 +1,6 @@
 # AI Native 多智能体协作平台
 
-Day 1 交付：项目骨架、基础设施与健康检查接口。
+Day 2 交付：统一 LLMClient、四供应商 adapter、writer 单 Agent 原型与开发演示 API。
 
 ## 前置条件
 
@@ -47,9 +47,31 @@ uv run --package api uvicorn api.main:app --app-dir apps/api/src --reload --host
 ```powershell
 curl http://localhost:8000/health
 curl http://localhost:8000/ready
+curl http://localhost:8000/api/providers
 ```
 
-### 4. 启动前端骨架（可选）
+### 4. Writer 单 Agent 演示（Day 2）
+
+在 `.env` 中配置 LLM 供应商后，可通过开发接口生成 Markdown 摘要：
+
+```powershell
+curl -X POST http://localhost:8000/api/dev/writer/summarize `
+  -H "Content-Type: application/json" `
+  -d '{"topic":"什么是 Dapr Workflow"}'
+```
+
+切换模型供应商时**只需修改环境变量**，无需改动 Agent 代码：
+
+| 目标 | 环境变量 |
+| --- | --- |
+| DeepSeek（开发期默认） | `LLM_PROVIDER=deepseek`，并设置 `DEEPSEEK_API_KEY` |
+| Ollama 本地模型 | `LLM_PROVIDER=ollama`，确保 `OLLAMA_BASE_URL` 与 `OLLAMA_MODEL` 可用 |
+| OpenAI | `LLM_PROVIDER=openai`，并设置 `OPENAI_API_KEY` |
+| Claude | `LLM_PROVIDER=anthropic`（或 `claude`），并设置 `ANTHROPIC_API_KEY` |
+
+可选弹性参数：`LLM_TIMEOUT_SECONDS`（默认 60）、`LLM_MAX_RETRIES`（默认 1）。
+
+### 5. 启动前端骨架（可选）
 
 ```powershell
 npm --prefix apps/web install
@@ -62,7 +84,7 @@ npm --prefix apps/web run dev
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy apps/api/src apps/mcp-server/src
-uv run pytest apps/api/tests apps/mcp-server/tests -q -m "not integration"
+uv run pytest apps/api/tests apps/mcp-server/tests -q -m "not integration and not smoke and not network"
 
 npm --prefix apps/web run lint
 npm --prefix apps/web run typecheck
@@ -74,6 +96,12 @@ npm --prefix apps/web run build
 
 ```powershell
 uv run pytest apps/api/tests -q -m integration
+```
+
+真实 LLM smoke test（需 DeepSeek key 或本地 Ollama）：
+
+```powershell
+uv run pytest apps/api/tests -q -m smoke
 ```
 
 ## 目录结构

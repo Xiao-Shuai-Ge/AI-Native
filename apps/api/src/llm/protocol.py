@@ -39,12 +39,22 @@ class LLMCapabilities(BaseModel):
     max_context_tokens: int | None = None
 
 
+class LLMProviderInfo(BaseModel):
+    provider: str
+    model: str
+    capabilities: LLMCapabilities = Field(default_factory=LLMCapabilities)
+
+
 class LLMClient(Protocol):
+    @property
+    def provider_info(self) -> LLMProviderInfo: ...
+
     async def chat(
         self,
         messages: list[ChatMessage],
         *,
-        timeout: float,
+        timeout: float | None = None,
+        task_id: str | None = None,
     ) -> ChatResponse: ...
 
     async def chat_structured(
@@ -52,11 +62,6 @@ class LLMClient(Protocol):
         messages: list[ChatMessage],
         schema: type[T],
         *,
-        timeout: float,
+        timeout: float | None = None,
+        task_id: str | None = None,
     ) -> T: ...
-
-
-class LLMProviderInfo(BaseModel):
-    provider: str
-    model: str
-    capabilities: LLMCapabilities = Field(default_factory=LLMCapabilities)

@@ -2,7 +2,9 @@
 
 from fastapi import FastAPI, Response
 
+from api.routes.dev_writer import router as dev_writer_router
 from api.routes.health import router as health_router
+from api.routes.providers import router as providers_router
 
 app = FastAPI(
     title="AI Native API",
@@ -11,6 +13,8 @@ app = FastAPI(
 )
 
 app.include_router(health_router)
+app.include_router(dev_writer_router)
+app.include_router(providers_router)
 
 
 @app.get("/metrics")

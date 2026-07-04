@@ -52,4 +52,6 @@ asyncio_default_fixture_loop_scope = "function"
 testpaths = ["apps/api/tests", "apps/mcp-server/tests"]
 markers = [
     "integration: tests requiring docker compose services",
+    "smoke: tests requiring real LLM providers",
+    "network: tests requiring external network access",
 ]
