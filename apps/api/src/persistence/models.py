@@ -99,6 +99,7 @@ class ToolCallRecord(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    idempotency_key: Mapped[str] = mapped_column(String(256), nullable=False, unique=True)
 
     task: Mapped[TaskRecord] = relationship(back_populates="tool_calls")
 

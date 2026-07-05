@@ -25,6 +25,16 @@ export type TaskStep = {
   created_at: string;
 };
 
+export type ToolCall = {
+  id: string;
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  result_summary: string | null;
+  error: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
 export type TaskSummary = {
   task_id: string;
   session_id: string | null;
@@ -44,6 +54,7 @@ export type TaskDetail = TaskSummary & {
   engine_selection_reason: string | null;
   steps: TaskStep[];
   audit_events: AuditEvent[];
+  tool_calls: ToolCall[];
   messages: Array<{ id: string; role: string; content: string; created_at: string }>;
   runtime_state: Record<string, unknown> | null;
   user_preferences: Record<string, unknown> | null;

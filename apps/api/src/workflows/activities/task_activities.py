@@ -16,13 +16,14 @@ from sqlalchemy.exc import IntegrityError
 from api.services.settings_service import SettingsService
 from events.schemas import AgentTaskEvent
 from llm.factory import create_llm_client
+from mcp_client.factory import create_mcp_client
 from orchestration.crewai_engine.roles_runner import run_analyst, run_researcher, run_writer
 from orchestration.engine_router import EngineRouter
 from orchestration.langgraph_engine.engine import LangGraphEngine
-from orchestration.models import EngineChoice, TaskRequest, TaskState, TaskStatus
+from orchestration.models import EngineChoice, TaskRequest, TaskState, TaskStatus, ToolCallRecord
 from persistence.checkpointer import DaprCheckpointSaver
 from persistence.dapr_client import DaprHttpClient
-from persistence.idempotency import step_idempotency_key
+from persistence.idempotency import step_idempotency_key, tool_call_idempotency_key
 from persistence.models import TaskStepRecord
 from persistence.repository import TaskRepository
 from workflows.constraints import (
@@ -176,7 +177,7 @@ async def _commit_crewai_step[TModel: BaseModel](
             task_id=task_id,
             step_name=step_name,
             status="completed",
-            output_json=result.model_dump(),
+            output_json=result.model_dump(mode="json"),
             idempotency_key=idempotency_key,
         )
         if record is not None:
@@ -329,11 +330,68 @@ async def _record_langgraph_node(task_id: UUID, step_name: str, status: str) -> 
         )
 
 
+async def _persist_tool_calls(
+    task_id: UUID,
+    tool_calls: list[ToolCallRecord],
+    *,
+    step_name: str,
+    engine_suffix: str,
+    step_idempotency_key_value: str,
+) -> None:
+    if not tool_calls:
+        return
+    runtime = get_activity_runtime()
+    try:
+        async with runtime.session_factory() as session:
+            repo = TaskRepository(session)
+            step_id = await repo.get_step_id_by_idempotency_key(step_idempotency_key_value)
+            for call in tool_calls:
+                idempotency_key = tool_call_idempotency_key(
+                    task_id,
+                    step_name,
+                    call,
+                    engine_suffix=engine_suffix,
+                )
+                await repo.record_tool_call(
+                    task_id=task_id,
+                    call=call,
+                    step_id=step_id,
+                    idempotency_key=idempotency_key,
+                )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "failed to persist tool call records",
+            extra={"task_id": str(task_id), "step": step_name, "error": str(exc)},
+        )
+
+
+async def _persist_missing_tool_calls(
+    task_id: UUID,
+    tool_calls: list[ToolCallRecord],
+    *,
+    step_name: str,
+    engine_suffix: str,
+) -> None:
+    """Persists tool calls idempotently for the given workflow step."""
+    relevant_calls = [
+        call for call in tool_calls if call.step_name is None or call.step_name == step_name
+    ]
+    step_key = step_idempotency_key(task_id, step_name, engine_suffix)
+    await _persist_tool_calls(
+        task_id,
+        relevant_calls,
+        step_name=step_name,
+        engine_suffix=engine_suffix,
+        step_idempotency_key_value=step_key,
+    )
+
+
 async def _run_langgraph_graph_impl(step_input: LangGraphStepInput) -> LangGraphStepResult:
     runtime = get_activity_runtime()
     task_id = step_input.task_id
 
-    async def on_node_complete(step_name: str, status: str, _state: TaskState) -> None:
+    async def on_node_complete(step_name: str, status: str, state: TaskState) -> None:
         await _publish_event(
             task_id=task_id,
             engine=step_input.engine,
@@ -343,6 +401,12 @@ async def _run_langgraph_graph_impl(step_input: LangGraphStepInput) -> LangGraph
         )
         await _record_langgraph_node(task_id, step_name, status)
         await _update_runtime_state(task_id, TaskStatus.RUNNING, current_step=step_name)
+        await _persist_missing_tool_calls(
+            task_id,
+            state.tool_calls,
+            step_name=step_name,
+            engine_suffix="langgraph",
+        )
 
     async def persist_result(state: TaskState) -> None:
         await _update_runtime_state(
@@ -361,12 +425,14 @@ async def _run_langgraph_graph_impl(step_input: LangGraphStepInput) -> LangGraph
     runtime_settings = await settings_service.get_settings()
     role_registry = settings_service.role_registry_from_settings(runtime_settings)
     llm = create_llm_client(runtime.settings, runtime_llm=runtime_settings.llm)
+    mcp_client = create_mcp_client(runtime.settings)
     engine = LangGraphEngine(
         llm=llm,
         checkpointer=checkpointer,
         on_node_complete=on_node_complete,
         persist_result=persist_result,
         role_registry=role_registry,
+        mcp_client=mcp_client,
     )
 
     existing_checkpoint = await checkpointer.aget_tuple(
@@ -455,25 +521,34 @@ async def _run_crewai_researcher_impl(
 
     cached = await _load_recorded_step_output(idempotency_key, CrewAIResearcherResult)
     if cached is not None:
+        await _persist_missing_tool_calls(
+            task_id,
+            cached.tool_calls,
+            step_name=step_name,
+            engine_suffix="crewai",
+        )
         return cached
 
     settings_service = SettingsService(_require_dapr_client(runtime), runtime.settings)
     runtime_settings = await settings_service.get_settings()
     role_registry = settings_service.role_registry_from_settings(runtime_settings)
     llm = create_llm_client(runtime.settings, runtime_llm=runtime_settings.llm)
+    mcp_client = create_mcp_client(runtime.settings)
 
-    notes_result = await run_researcher(
+    notes_result, tool_calls = await run_researcher(
         step_input.user_query,
         task_id=task_id,
         llm=llm,
         subtask=step_input.subtask,
         role=role_registry.get("researcher"),
+        mcp_client=mcp_client,
     )
     result = CrewAIResearcherResult(
         notes=list(notes_result.notes),
         sources=list(notes_result.sources),
+        tool_calls=tool_calls,
     )
-    return await _commit_crewai_step(
+    committed = await _commit_crewai_step(
         task_id=task_id,
         step_name=step_name,
         engine=step_input.engine,
@@ -481,6 +556,13 @@ async def _run_crewai_researcher_impl(
         result=result,
         result_type=CrewAIResearcherResult,
     )
+    await _persist_missing_tool_calls(
+        task_id,
+        committed.tool_calls,
+        step_name=step_name,
+        engine_suffix="crewai",
+    )
+    return committed
 
 
 def run_crewai_researcher(
@@ -501,23 +583,31 @@ async def _run_crewai_analyst_impl(step_input: CrewAIAnalystInput) -> CrewAIAnal
 
     cached = await _load_recorded_step_output(idempotency_key, CrewAIAnalystResult)
     if cached is not None:
+        await _persist_missing_tool_calls(
+            task_id,
+            cached.tool_calls,
+            step_name=step_name,
+            engine_suffix="crewai",
+        )
         return cached
 
     settings_service = SettingsService(_require_dapr_client(runtime), runtime.settings)
     runtime_settings = await settings_service.get_settings()
     role_registry = settings_service.role_registry_from_settings(runtime_settings)
     llm = create_llm_client(runtime.settings, runtime_llm=runtime_settings.llm)
+    mcp_client = create_mcp_client(runtime.settings)
 
-    analysis_result = await run_analyst(
+    analysis_result, tool_calls = await run_analyst(
         step_input.user_query,
         task_id=task_id,
         llm=llm,
         research_notes=step_input.research_notes,
         subtask=step_input.subtask,
         role=role_registry.get("analyst"),
+        mcp_client=mcp_client,
     )
-    result = CrewAIAnalystResult(analysis=analysis_result.analysis)
-    return await _commit_crewai_step(
+    result = CrewAIAnalystResult(analysis=analysis_result.analysis, tool_calls=tool_calls)
+    committed = await _commit_crewai_step(
         task_id=task_id,
         step_name=step_name,
         engine=step_input.engine,
@@ -525,6 +615,13 @@ async def _run_crewai_analyst_impl(step_input: CrewAIAnalystInput) -> CrewAIAnal
         result=result,
         result_type=CrewAIAnalystResult,
     )
+    await _persist_missing_tool_calls(
+        task_id,
+        committed.tool_calls,
+        step_name=step_name,
+        engine_suffix="crewai",
+    )
+    return committed
 
 
 def run_crewai_analyst(

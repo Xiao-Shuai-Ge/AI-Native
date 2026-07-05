@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     workflow_dapr_grpc_port: int | None = Field(default=None, alias="WORKFLOW_DAPR_GRPC_PORT")
 
     mcp_server_url: str = Field(default="http://localhost:8001", alias="MCP_SERVER_URL")
+    mcp_service_invocation_app_id: str = Field(
+        default="mcp-server", alias="MCP_SERVICE_INVOCATION_APP_ID"
+    )
+    mcp_tool_call_timeout_seconds: float = Field(
+        default=15.0, alias="MCP_TOOL_CALL_TIMEOUT_SECONDS"
+    )
+    mcp_use_dapr_invocation: bool = Field(default=True, alias="MCP_USE_DAPR_INVOCATION")
 
     otel_exporter_otlp_endpoint: str = Field(
         default="http://localhost:4317",

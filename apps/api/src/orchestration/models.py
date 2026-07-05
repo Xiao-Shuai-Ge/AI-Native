@@ -30,6 +30,7 @@ class ToolCallRecord(BaseModel):
     error: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    step_name: str | None = None
 
 
 class TaskRequest(BaseModel):

@@ -15,8 +15,9 @@ from uuid import uuid4
 
 from agents.roles import ANALYST_ROLE, RESEARCHER_ROLE, WRITER_ROLE, RoleConfig
 from llm.protocol import LLMClient
+from mcp_client.client import MCPClient
 from orchestration.crewai_engine.roles_runner import run_analyst, run_researcher, run_writer
-from orchestration.models import EngineChoice, TaskRequest, TaskResult, TaskStatus
+from orchestration.models import EngineChoice, TaskRequest, TaskResult, TaskStatus, ToolCallRecord
 
 RoleEventCallback = Callable[[str, str], Awaitable[None]]
 
@@ -30,33 +31,44 @@ class CrewAIEngine:
         llm: LLMClient,
         role_registry: dict[str, RoleConfig] | None = None,
         on_role_complete: RoleEventCallback | None = None,
+        mcp_client: MCPClient | None = None,
     ) -> None:
         self._llm = llm
         self._role_registry = role_registry or {}
         self._on_role_complete = on_role_complete
+        self._mcp_client = mcp_client
+        # Exposed for tests/callers that want the tool-call audit trail from
+        # the most recent `run()`; not part of `TaskResult` (kept identical
+        # across engines) so this stays an engine-specific convenience.
+        self.tool_calls: list[ToolCallRecord] = []
 
     async def run(self, request: TaskRequest) -> TaskResult:
         task_id = request.task_id or uuid4()
         errors: list[str] = []
         report: str | None = None
+        self.tool_calls = []
         try:
             researcher_role = self._role_registry.get("researcher", RESEARCHER_ROLE)
-            notes_result = await run_researcher(
+            notes_result, researcher_tool_calls = await run_researcher(
                 request.user_query,
                 task_id=task_id,
                 llm=self._llm,
                 role=researcher_role,
+                mcp_client=self._mcp_client,
             )
+            self.tool_calls.extend(researcher_tool_calls)
             await self._emit("researcher")
 
             analyst_role = self._role_registry.get("analyst", ANALYST_ROLE)
-            analysis_result = await run_analyst(
+            analysis_result, analyst_tool_calls = await run_analyst(
                 request.user_query,
                 task_id=task_id,
                 llm=self._llm,
                 research_notes=list(notes_result.notes),
                 role=analyst_role,
+                mcp_client=self._mcp_client,
             )
+            self.tool_calls.extend(analyst_tool_calls)
             await self._emit("analyst")
 
             writer_role = self._role_registry.get("writer", WRITER_ROLE)

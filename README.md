@@ -1,5 +1,7 @@
 # AI Native 多智能体协作平台
 
+Day 7 交付：MCP Server（`calculator`/`web_search`/`code_runner`/`readonly_sql` 四个工具）、`GET /api/tools` 动态发现、LangGraph 与 CrewAI 两个引擎共用的 ReAct 工具调用循环（researcher/analyst 角色按 allowlist 自主决定是否调用工具）。
+
 Day 5～6 交付：Web 控制台（新建任务、详情 SSE/轮询、历史、设置）、`GET/PUT /api/settings`、`GET /api/tasks/{id}/events` SSE。
 
 Day 4 交付：Dapr Workflow 耐久编排、独立 Worker、任务暂停/恢复、Worker 重启恢复演示、DurableAgent smoke test。
@@ -252,6 +254,64 @@ npm --prefix apps/web install
 npm --prefix apps/web run dev
 ```
 
+### 8. MCP Server 与工具调用（Day 7）
+
+**启动方式**
+
+Docker Compose（推荐，`code_runner` 需要访问宿主 Docker daemon）：
+
+```bash
+docker compose up -d --build mcp-server mcp-server-daprd
+```
+
+本地开发（无 Dapr，`code_runner`/`readonly_sql` 需相应本机环境）：
+
+```bash
+uv run --package mcp-server uvicorn mcp_server.server:app --app-dir apps/mcp-server/src --reload --host 0.0.0.0 --port 8001
+```
+
+`api`/`worker` 通过 Dapr Service Invocation（`MCP_SERVICE_INVOCATION_APP_ID=mcp-server`，即
+`http://localhost:{DAPR_HTTP_PORT}/v1.0/invoke/mcp-server/method/mcp`）调用 MCP Server；未连接 Dapr
+sidecar 时会回退到直连 `MCP_SERVER_URL`（`MCP_USE_DAPR_INVOCATION=false`）。
+
+**四个工具**
+
+| 工具 | 说明 | 关键限制 |
+| --- | --- | --- |
+| `calculator` | AST 白名单求值数学表达式，不使用 `eval` | 仅允许四则运算/`sqrt`/`sin`/`cos`/`round` 等白名单函数 |
+| `web_search` | 通过 Bocha/LangSearch 查询网页搜索 API | 5 秒超时、最多 5 条、限制响应体大小，API Key 来自环境变量 |
+| `code_runner` | 在一次性 Docker 容器中执行 `python`/`shell` 代码 | `--network=none --read-only --cap-drop=ALL`，限制 CPU/内存/超时，沙箱容器不挂载项目目录/socket/密钥 |
+| `readonly_sql` | 用只读数据库角色执行单条 `SELECT` | 拒绝多语句/写操作关键字，限制返回行数与超时 |
+
+查询已发现的工具列表：
+
+```bash
+curl http://localhost:8000/api/tools
+```
+
+**角色 allowlist**（AGENTS.md 第 7 条：Agent 只能调用显式 allowlist 中的工具）：`researcher` →
+`web_search`/`calculator`；`analyst` → `calculator`/`readonly_sql`；`writer` 无工具权限。若 MCP
+Server 暂时不可用，researcher/analyst 会记录警告日志并降级为纯文本回答，不会导致整个任务失败。
+
+**新增环境变量**（详见 `.env.example`）：
+
+| 变量 | 说明 |
+| --- | --- |
+| `MCP_SERVER_URL` | MCP Server 直连地址（Dapr 不可用时的回退） |
+| `MCP_SERVICE_INVOCATION_APP_ID` | Dapr Service Invocation 的目标 app-id，默认 `mcp-server` |
+| `MCP_USE_DAPR_INVOCATION` | 是否优先走 Dapr Service Invocation，默认 `true` |
+| `MCP_TOOL_CALL_TIMEOUT_SECONDS` | 单次工具调用超时 |
+| `READONLY_SQL_DSN` | `readonly_sql` 专用只读连接串（独立于业务 DSN） |
+| `READONLY_SQL_TIMEOUT_SECONDS` / `READONLY_SQL_MAX_ROWS` | 查询超时 / 最大返回行数 |
+| `CODE_RUNNER_IMAGE` / `CODE_RUNNER_TIMEOUT_SECONDS` / `CODE_RUNNER_MEMORY_LIMIT` / `CODE_RUNNER_CPU_LIMIT` | 沙箱容器镜像与资源限制 |
+| `BOCHA_API_KEY` | Bocha/LangSearch API Key，用于 `web_search` |
+| `BOCHA_SEARCH_URL` | Bocha/LangSearch 搜索接口，默认 `https://api.bochaai.com/v1/web-search` |
+| `WEB_SEARCH_TIMEOUT_SECONDS` | `web_search` 超时 |
+
+**已知限制**：`dapr/config/config.yaml` 目前未配置显式 `accessControl`（Dapr 默认允许同一
+Compose 网络内所有 Service Invocation），课程范围内可接受；生产化需追加仅允许
+`api`/`worker` 调用 `mcp-server` 的显式策略。
+
 ## 质量检查
 
 ```powershell
@@ -287,8 +347,8 @@ uv run pytest apps/api/tests/test_durable_agent_smoke.py -q
 ## 目录结构
 
 ```text
-apps/api/          FastAPI 后端（persistence、events、workflows、tasks API）
-apps/mcp-server/   MCP Server 占位
+apps/api/          FastAPI 后端（persistence、events、workflows、tasks API、mcp_client）
+apps/mcp-server/   MCP Server：calculator/web_search/code_runner/readonly_sql 工具
 apps/web/          React + Vite 前端骨架
 dapr/              Dapr 组件与配置模板
 infra/             Prometheus、Dockerfile、worker entrypoint

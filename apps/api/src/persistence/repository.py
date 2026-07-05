@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from orchestration.models import EngineChoice, TaskStatus
+from orchestration.models import ToolCallRecord as ToolCallDomainModel
 from persistence.models import (
     AuditEventRecord,
     TaskMessageRecord,
@@ -16,6 +17,7 @@ from persistence.models import (
     TaskStepRecord,
     UserPreferenceRecord,
 )
+from persistence.models import ToolCallRecord as ToolCallORM
 from persistence.state_machine import assert_transition
 
 
@@ -157,6 +159,50 @@ class TaskRepository:
             status=status,
             payload=payload,
             event_time=event_time,
+            idempotency_key=idempotency_key,
+        )
+        self._session.add(record)
+        await self._session.flush()
+        return record
+
+    async def count_tool_calls(self, task_id: UUID) -> int:
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(ToolCallORM)
+            .where(ToolCallORM.task_id == task_id)
+        )
+        return int(result.scalar_one())
+
+    async def get_step_id_by_idempotency_key(self, idempotency_key: str) -> UUID | None:
+        result = await self._session.execute(
+            select(TaskStepRecord.id).where(TaskStepRecord.idempotency_key == idempotency_key)
+        )
+        return result.scalar_one_or_none()
+
+    async def record_tool_call(
+        self,
+        *,
+        task_id: UUID,
+        call: ToolCallDomainModel,
+        idempotency_key: str,
+        step_id: UUID | None = None,
+    ) -> ToolCallORM | None:
+        """Persists one tool invocation for the task-detail audit trail."""
+        existing = await self._session.execute(
+            select(ToolCallORM).where(ToolCallORM.idempotency_key == idempotency_key)
+        )
+        if existing.scalar_one_or_none() is not None:
+            return None
+
+        record = ToolCallORM(
+            task_id=task_id,
+            step_id=step_id,
+            tool_name=call.tool_name,
+            arguments=call.arguments,
+            result_summary=call.result_summary,
+            error=call.error,
+            started_at=call.started_at,
+            finished_at=call.finished_at,
             idempotency_key=idempotency_key,
         )
         self._session.add(record)

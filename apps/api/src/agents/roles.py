@@ -14,6 +14,8 @@ class RoleConfig(BaseModel):
     backstory: str
     instructions: str
     version: str = Field(default="v1")
+    tool_allowlist: list[str] = Field(default_factory=list)
+    """Tool names this role may call (AGENTS.md section 7: explicit allowlist only)."""
 
 
 WRITER_ROLE = RoleConfig(
@@ -28,6 +30,7 @@ WRITER_ROLE = RoleConfig(
         "and bullet points when helpful. Stay factual and avoid speculation."
     ),
     version="v1",
+    tool_allowlist=[],
 )
 
 RESEARCHER_ROLE = RoleConfig(
@@ -43,6 +46,7 @@ RESEARCHER_ROLE = RoleConfig(
         "Do not fabricate specific statistics or citations you are not confident about."
     ),
     version="v1",
+    tool_allowlist=["web_search", "calculator"],
 )
 
 ANALYST_ROLE = RoleConfig(
@@ -56,6 +60,7 @@ ANALYST_ROLE = RoleConfig(
         "highlighting the key findings and their implications. Stay factual."
     ),
     version="v1",
+    tool_allowlist=["calculator", "readonly_sql"],
 )
 
 # Fixed P0 role registry: Planner may only select subsets of these roles.

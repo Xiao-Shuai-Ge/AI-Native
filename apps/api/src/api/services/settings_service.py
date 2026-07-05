@@ -78,6 +78,11 @@ class SettingsService:
         self,
         runtime: RuntimeSettingsResponse,
     ) -> dict[str, RoleConfig]:
+        # `tool_allowlist` is fixed per role (AGENTS.md section 7: explicit
+        # allowlist only) and is never one of the fields the settings page
+        # lets users edit (role/goal/backstory/instructions/model params), so
+        # it always comes from the code-defined `ROLE_REGISTRY`, not from
+        # user-controlled runtime settings.
         return {
             key: RoleConfig(
                 role=runtime.agents[key].role,
@@ -85,6 +90,7 @@ class SettingsService:
                 backstory=runtime.agents[key].backstory,
                 instructions=runtime.agents[key].instructions,
                 version=runtime.agents[key].version,
+                tool_allowlist=list(ROLE_REGISTRY[key].tool_allowlist),
             )
             for key in ALLOWED_AGENT_KEYS
         }

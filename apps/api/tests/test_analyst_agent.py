@@ -18,7 +18,7 @@ async def test_analyst_returns_structured_analysis() -> None:
         )
     )
     analyst = AnalystAgent()
-    result = await analyst.analyze(
+    result, tool_calls = await analyst.analyze(
         "什么是 Dapr Workflow",
         task_id=uuid4(),
         llm=fake,
@@ -28,6 +28,7 @@ async def test_analyst_returns_structured_analysis() -> None:
     assert isinstance(result, AnalystSummary)
     assert result.analysis
     assert fake.structured_calls
+    assert tool_calls == []
 
 
 @pytest.mark.asyncio

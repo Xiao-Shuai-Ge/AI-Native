@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import pytest
@@ -11,6 +12,8 @@ from pydantic import BaseModel
 
 from agents.schemas import AnalystSummary, PlanOutput, ResearcherNotes, WriterSummary
 from llm.fake import FakeLLMClient
+from llm.protocol import ChatResponse, ToolCall
+from mcp_client.schema import MCPToolInfo
 from orchestration.langgraph_engine.engine import LangGraphEngine
 from orchestration.langgraph_engine.graph import build_graph
 from orchestration.langgraph_engine.state import STEP_PLAN, from_task_state
@@ -65,6 +68,92 @@ async def test_full_graph_with_all_roles_produces_report() -> None:
     assert result.status == TaskStatus.SUCCEEDED
     assert result.engine_selected == EngineChoice.LANGGRAPH
     assert result.report and "Fake Title" in result.report
+    assert events == ["plan", "select_roles", "researcher", "analyst", "writer", "persist_result"]
+
+
+class _FakeMCPClient:
+    """Minimal MCPClient double: discovers 2 tools, echoes tool call inputs."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    @asynccontextmanager
+    async def session(self):  # type: ignore[no-untyped-def]
+        yield self
+
+    async def discover_tools(self, *, session: object | None = None) -> list[MCPToolInfo]:
+        return [
+            MCPToolInfo(name="web_search", description="search", input_schema={}),
+            MCPToolInfo(name="calculator", description="math", input_schema={}),
+            MCPToolInfo(name="readonly_sql", description="sql", input_schema={}),
+        ]
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, object],
+        *,
+        timeout: float | None = None,
+        session: object | None = None,
+    ) -> dict[str, object]:
+        self.calls.append((name, arguments))
+        return {"ok": True, "tool": name}
+
+
+@pytest.mark.asyncio
+async def test_full_graph_with_tools_produces_at_least_two_tool_calls() -> None:
+    """End-to-end LangGraph run where researcher+analyst each call one tool.
+
+    Exercises the real `agents.tool_loop.run_tool_loop` path (not just
+    `chat_structured`), and asserts both `GraphState.tool_calls` and the
+    per-node event stream reflect >=2 real tool invocations, matching the
+    Day 7 acceptance criterion.
+    """
+    researcher_call = ToolCall(id="call-1", name="web_search", arguments={"query": "dapr"})
+    analyst_call = ToolCall(id="call-2", name="calculator", arguments={"expression": "1+1"})
+
+    def _structured_handler(_messages: object, schema: type[BaseModel]) -> BaseModel:
+        if schema is PlanOutput:
+            return PlanOutput(assigned_roles=["researcher", "analyst", "writer"], subtasks={})
+        if schema is ResearcherNotes:
+            return ResearcherNotes(notes=["web_search says dapr is great"], sources=[])
+        if schema is AnalystSummary:
+            return AnalystSummary(analysis="1+1 is 2, so the metric doubled")
+        if schema is WriterSummary:
+            return WriterSummary(
+                title="Fake Title", summary="Fake summary", markdown="# Fake Title\n\nFake summary"
+            )
+        msg = f"unexpected schema requested: {schema}"
+        raise AssertionError(msg)
+
+    llm = FakeLLMClient(
+        chat_responses=[
+            ChatResponse(content="", tool_calls=[researcher_call]),
+            ChatResponse(content="found it"),
+            ChatResponse(content="", tool_calls=[analyst_call]),
+            ChatResponse(content="computed it"),
+        ],
+        structured_handler=_structured_handler,
+    )
+    mcp_client = _FakeMCPClient()
+    events: list[str] = []
+
+    async def on_node_complete(step_name: str, status: str, _state: TaskState) -> None:
+        events.append(step_name)
+
+    engine = LangGraphEngine(
+        llm=llm,
+        checkpointer=MemorySaver(),
+        on_node_complete=on_node_complete,
+        mcp_client=mcp_client,
+    )
+    result = await engine.run(
+        TaskRequest(user_query="什么是 Dapr Workflow", engine=EngineChoice.LANGGRAPH)
+    )
+
+    assert result.status == TaskStatus.SUCCEEDED
+    assert len(mcp_client.calls) == 2
+    assert {name for name, _args in mcp_client.calls} == {"web_search", "calculator"}
     assert events == ["plan", "select_roles", "researcher", "analyst", "writer", "persist_result"]
 
 

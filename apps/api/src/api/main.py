@@ -14,6 +14,7 @@ from api.routes.preferences import router as preferences_router
 from api.routes.providers import router as providers_router
 from api.routes.settings import router as settings_router
 from api.routes.tasks import router as tasks_router
+from api.routes.tools import router as tools_router
 
 
 @asynccontextmanager
@@ -38,6 +39,7 @@ app.include_router(settings_router)
 app.include_router(tasks_router)
 app.include_router(preferences_router)
 app.include_router(dapr_router)
+app.include_router(tools_router)
 
 
 @app.get("/metrics")

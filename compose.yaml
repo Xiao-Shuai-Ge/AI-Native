@@ -80,12 +80,17 @@ services:
       WORKFLOW_DAPR_GRPC_PORT: 50001
       LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      MCP_SERVER_URL: http://mcp-server:8001
+      MCP_SERVICE_INVOCATION_APP_ID: mcp-server
+      MCP_USE_DAPR_INVOCATION: ${MCP_USE_DAPR_INVOCATION:-true}
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
       worker-daprd:
+        condition: service_started
+      mcp-server-daprd:
         condition: service_started
     networks:
       - ainative
@@ -104,6 +109,71 @@ services:
       - "api"
       - "-app-port"
       - "8000"
+      - "-dapr-http-port"
+      - "3500"
+      - "-dapr-grpc-port"
+      - "50001"
+      - "-components-path"
+      - "/components"
+      - "-config"
+      - "/config/config.yaml"
+      - "-placement-host-address"
+      - "placement:50005"
+      - "-scheduler-host-address"
+      - "scheduler:50006"
+    volumes:
+      - ./dapr/components/statestore.yaml:/components/statestore.yaml:ro
+      - ./dapr/components/pubsub.yaml:/components/pubsub.yaml:ro
+      - ./dapr/config:/config:ro
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.mcp-server
+    container_name: ainative-mcp-server
+    ports:
+      - "${MCP_SERVER_PORT:-8001}:8001"
+    environment:
+      MCP_SERVER_HOST: 0.0.0.0
+      MCP_SERVER_PORT: 8001
+      READONLY_SQL_DSN: ${READONLY_SQL_DSN:-postgresql://ainative_readonly:ainative_readonly@postgres:5432/ainative}
+      READONLY_SQL_TIMEOUT_SECONDS: ${READONLY_SQL_TIMEOUT_SECONDS:-5}
+      READONLY_SQL_MAX_ROWS: ${READONLY_SQL_MAX_ROWS:-100}
+      BOCHA_API_KEY: ${BOCHA_API_KEY:-}
+      BOCHA_SEARCH_URL: ${BOCHA_SEARCH_URL:-https://api.bochaai.com/v1/web-search}
+      WEB_SEARCH_TIMEOUT_SECONDS: ${WEB_SEARCH_TIMEOUT_SECONDS:-5}
+      CODE_RUNNER_IMAGE: ${CODE_RUNNER_IMAGE:-python:3.12-alpine}
+      CODE_RUNNER_TIMEOUT_SECONDS: ${CODE_RUNNER_TIMEOUT_SECONDS:-5}
+      CODE_RUNNER_MEMORY_LIMIT: ${CODE_RUNNER_MEMORY_LIMIT:-128m}
+      CODE_RUNNER_CPU_LIMIT: ${CODE_RUNNER_CPU_LIMIT:-0.5}
+    volumes:
+      # `code_runner` shells out to the *host* Docker daemon to launch
+      # one-shot, network-less sandbox containers (see
+      # `mcp_server/tools/code_runner.py`); this is the only container in
+      # the stack that mounts the Docker socket, and it never mounts the
+      # project directory, other secrets, or forwards this socket into the
+      # sandbox containers it spawns.
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ainative
+
+  mcp-server-daprd:
+    image: daprio/daprd:1.15.0
+    container_name: ainative-mcp-server-daprd
+    network_mode: "service:mcp-server"
+    depends_on:
+      - mcp-server
+      - placement
+      - scheduler
+    command:
+      - "./daprd"
+      - "-app-id"
+      - "mcp-server"
+      - "-app-port"
+      - "8001"
       - "-dapr-http-port"
       - "3500"
       - "-dapr-grpc-port"
@@ -153,6 +223,9 @@ services:
       DAPR_CONFIG_PATH: /dapr/config/config.yaml
       LLM_PROVIDER: ${LLM_PROVIDER:-deepseek}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      MCP_SERVER_URL: http://mcp-server:8001
+      MCP_SERVICE_INVOCATION_APP_ID: mcp-server
+      MCP_USE_DAPR_INVOCATION: ${MCP_USE_DAPR_INVOCATION:-true}
     volumes:
       - ./dapr/components:/dapr/components:ro
       - ./dapr/config:/dapr/config:ro
@@ -161,6 +234,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      mcp-server-daprd:
+        condition: service_started
     networks:
       - ainative
 

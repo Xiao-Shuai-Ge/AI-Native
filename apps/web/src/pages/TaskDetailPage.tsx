@@ -5,6 +5,7 @@ import { pauseTask, resumeTask } from "../api/tasks";
 import { ReportViewer } from "../components/ReportViewer";
 import { StatusBadge } from "../components/StatusBadge";
 import { StepTimeline } from "../components/StepTimeline";
+import { ToolCallsPanel } from "../components/ToolCallsPanel";
 import { useTaskEvents } from "../hooks/useTaskEvents";
 
 export function TaskDetailPage() {
@@ -133,6 +134,13 @@ export function TaskDetailPage() {
         <h3 className="text-lg font-medium">Agent 时间线</h3>
         <div className="mt-4">
           <StepTimeline events={auditEvents} />
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+        <h3 className="text-lg font-medium">工具调用</h3>
+        <div className="mt-4">
+          <ToolCallsPanel calls={task.tool_calls} />
         </div>
       </div>
 

@@ -1,0 +1,38 @@
+FROM python:3.12-slim-bookworm
+
+WORKDIR /app
+
+# docker-cli only (no daemon): code_runner shells out to the host Docker
+# daemon via the mounted /var/run/docker.sock to launch one-shot, network-less
+# sandbox containers (see mcp_server/tools/code_runner.py). This container
+# itself never mounts the project directory or secrets into those sandboxes.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" \
+        > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli \
+    && apt-get purge -y curl gnupg \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv
+
+COPY pyproject.toml uv.lock ./
+COPY apps/api/pyproject.toml apps/api/
+COPY apps/mcp-server/pyproject.toml apps/mcp-server/
+
+RUN uv sync --package mcp-server --no-dev
+
+COPY apps/mcp-server/src apps/mcp-server/src
+
+ENV PYTHONPATH=/app/apps/mcp-server/src
+
+WORKDIR /app/apps/mcp-server
+
+EXPOSE 8001
+
+CMD ["uv", "run", "python", "-m", "mcp_server"]

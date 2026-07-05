@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 from llm.protocol import ChatMessage, ChatRole
@@ -41,3 +42,37 @@ def anthropic_chat_payload(content: str, *, model: str = "claude-test") -> dict[
 
 def user_message(text: str) -> list[ChatMessage]:
     return [ChatMessage(role=ChatRole.USER, content=text)]
+
+
+def fake_litellm_response(
+    content: str = "",
+    *,
+    model: str = "test-model",
+    tool_calls: list[dict[str, Any]] | None = None,
+    finish_reason: str = "stop",
+    prompt_tokens: int = 12,
+    completion_tokens: int = 24,
+) -> SimpleNamespace:
+    """Builds a minimal object shaped like `litellm.types.utils.ModelResponse`.
+
+    Only the attributes read by `llm.litellm_support.parse_litellm_response`
+    are populated (`choices[0].message.content/.tool_calls`,
+    `choices[0].finish_reason`, `usage.*`, `model`).
+    """
+    message_tool_calls = None
+    if tool_calls:
+        message_tool_calls = [
+            SimpleNamespace(
+                id=call["id"],
+                function=SimpleNamespace(name=call["name"], arguments=call["arguments"]),
+            )
+            for call in tool_calls
+        ]
+    message = SimpleNamespace(content=content, tool_calls=message_tool_calls)
+    choice = SimpleNamespace(message=message, finish_reason=finish_reason)
+    usage = SimpleNamespace(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=prompt_tokens + completion_tokens,
+    )
+    return SimpleNamespace(choices=[choice], usage=usage, model=model)

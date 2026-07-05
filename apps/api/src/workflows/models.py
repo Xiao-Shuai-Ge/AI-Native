@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from orchestration.models import ToolCallRecord
+
 TASK_WORKFLOW_NAME = "task_orchestration"
 DELAYED_PROBE_STEP = "delayed_probe"
 STUB_STEPS: tuple[str, ...] = ("plan", "writer")
@@ -99,6 +101,7 @@ class CrewAIResearcherInput(BaseModel):
 class CrewAIResearcherResult(BaseModel):
     notes: list[str] = Field(default_factory=list)
     sources: list[dict[str, str]] = Field(default_factory=list)
+    tool_calls: list[ToolCallRecord] = Field(default_factory=list)
 
 
 class CrewAIAnalystInput(BaseModel):
@@ -113,6 +116,7 @@ class CrewAIAnalystInput(BaseModel):
 
 class CrewAIAnalystResult(BaseModel):
     analysis: str
+    tool_calls: list[ToolCallRecord] = Field(default_factory=list)
 
 
 class CrewAIWriterInput(BaseModel):

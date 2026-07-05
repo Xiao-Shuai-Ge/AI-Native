@@ -41,6 +41,16 @@ class AuditEventResponse(BaseModel):
     event_time: datetime
 
 
+class ToolCallResponse(BaseModel):
+    id: UUID
+    tool_name: str
+    arguments: dict[str, object]
+    result_summary: str | None = None
+    error: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+
 class TaskSummaryResponse(BaseModel):
     task_id: UUID
     session_id: UUID | None
@@ -61,6 +71,7 @@ class TaskDetailResponse(TaskSummaryResponse):
     steps: list[TaskStepResponse] = Field(default_factory=list)
     messages: list[TaskMessageResponse] = Field(default_factory=list)
     audit_events: list[AuditEventResponse] = Field(default_factory=list)
+    tool_calls: list[ToolCallResponse] = Field(default_factory=list)
     runtime_state: dict[str, object] | None = None
     user_preferences: dict[str, object] | None = None
     session_context: list[dict[str, object]] | None = None

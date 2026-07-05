@@ -1,7 +1,7 @@
 """LLM client types and protocol."""
 
 from enum import StrEnum
-from typing import Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from pydantic import BaseModel, Field
 
@@ -12,11 +12,32 @@ class ChatRole(StrEnum):
     SYSTEM = "system"
     USER = "user"
     ASSISTANT = "assistant"
+    TOOL = "tool"
+
+
+class ToolCall(BaseModel):
+    """A single tool invocation requested by the model (OpenAI-compatible shape)."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolDefinition(BaseModel):
+    """Tool schema offered to the model, converted from MCP tool metadata."""
+
+    name: str
+    description: str = ""
+    parameters: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatMessage(BaseModel):
     role: ChatRole
     content: str
+    tool_call_id: str | None = None
+    """Set on TOOL-role messages: which prior tool call this result answers."""
+    tool_calls: list[ToolCall] | None = None
+    """Set on ASSISTANT-role messages that requested tool calls."""
 
 
 class TokenUsage(BaseModel):
@@ -30,6 +51,7 @@ class ChatResponse(BaseModel):
     model: str | None = None
     usage: TokenUsage | None = None
     finish_reason: str | None = None
+    tool_calls: list[ToolCall] | None = None
 
 
 class LLMCapabilities(BaseModel):
@@ -55,6 +77,7 @@ class LLMClient(Protocol):
         *,
         timeout: float | None = None,
         task_id: str | None = None,
+        tools: list[ToolDefinition] | None = None,
     ) -> ChatResponse: ...
 
     async def chat_structured(

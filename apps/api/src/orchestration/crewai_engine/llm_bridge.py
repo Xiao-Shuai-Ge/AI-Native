@@ -12,6 +12,13 @@ schedules async `LLMClient` work back onto the Activity loop captured by
 `roles_runner` via `asyncio.run_coroutine_threadsafe`, with an Activity-aligned
 timeout. When no loop is available (unit tests), it falls back to a short-lived
 thread with the same timeout budget.
+
+When constructed with `mcp_client`/`tools`, `call()` runs the exact same
+`agents.tool_loop.run_tool_loop` used by the LangGraph engine (AGENTS.md
+section 8: "两个引擎共用...实现") instead of CrewAI's native `tools`/
+`available_functions` mechanism, which would require bypassing `LLMClient`.
+Every tool call made during a `call()` is appended to `tool_call_records` so
+`roles_runner` can read it back after `Crew.kickoff_async()` completes.
 """
 
 from __future__ import annotations
@@ -26,7 +33,10 @@ from typing import TYPE_CHECKING, Any
 from crewai.llms.base_llm import BaseLLM
 from pydantic import BaseModel
 
-from llm.protocol import ChatMessage, ChatRole, LLMClient
+from agents.tool_loop import run_tool_loop
+from llm.protocol import ChatMessage, ChatRole, LLMClient, ToolDefinition
+from mcp_client.client import MCPClient
+from orchestration.models import ToolCallRecord
 
 if TYPE_CHECKING:
     from crewai.agents.agent_builder.base_agent import BaseAgent
@@ -117,6 +127,8 @@ class CrewAILLMBridge(BaseLLM):
         task_id: str | None = None,
         async_loop: asyncio.AbstractEventLoop | None = None,
         call_timeout: float | None = DEFAULT_LLM_CALL_TIMEOUT_SECONDS,
+        mcp_client: MCPClient | None = None,
+        tools: list[ToolDefinition] | None = None,
     ) -> None:
         provider_info = llm_client.provider_info
         super().__init__(model=f"{provider_info.provider}/{provider_info.model}")
@@ -124,13 +136,16 @@ class CrewAILLMBridge(BaseLLM):
         self._task_id = task_id
         self._async_loop = async_loop
         self._call_timeout = call_timeout
+        self._mcp_client = mcp_client
+        self._tools = tools or []
+        self.tool_call_records: list[ToolCallRecord] = []
 
     def call(
         self,
         messages: str | list[LLMMessage],
-        tools: list[dict[str, BaseTool]] | None = None,
+        tools: list[dict[str, BaseTool]] | None = None,  # noqa: ARG002 - see class docstring
         callbacks: list[Any] | None = None,
-        available_functions: dict[str, Any] | None = None,
+        available_functions: dict[str, Any] | None = None,  # noqa: ARG002
         from_task: Task | None = None,
         from_agent: BaseAgent | None = None,
         response_model: type[BaseModel] | None = None,
@@ -147,6 +162,22 @@ class CrewAILLMBridge(BaseLLM):
                 timeout=self._call_timeout,
             )
             return parsed.model_dump_json()
+
+        if self._tools and self._mcp_client is not None:
+            loop_result = _run_async_llm(
+                run_tool_loop(
+                    llm=self._llm_client,
+                    messages=chat_messages,
+                    tools=self._tools,
+                    mcp_client=self._mcp_client,
+                    task_id=self._task_id,
+                ),
+                async_loop=self._async_loop,
+                timeout=self._call_timeout,
+            )
+            self.tool_call_records.extend(loop_result.tool_calls)
+            return loop_result.final_content
+
         response = _run_async_llm(
             self._llm_client.chat(chat_messages, task_id=self._task_id),
             async_loop=self._async_loop,

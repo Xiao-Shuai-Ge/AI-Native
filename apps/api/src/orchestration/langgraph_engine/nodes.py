@@ -14,8 +14,10 @@ from agents.analyst import AnalystAgent
 from agents.planner import PlannerAgent
 from agents.researcher import ResearcherAgent
 from agents.roles import ROLE_REGISTRY, RoleConfig
+from agents.tool_loop import resolve_role_tools
 from agents.writer import WriterAgent
 from llm.protocol import LLMClient
+from mcp_client.client import MCPClient
 from orchestration.langgraph_engine.state import (
     STEP_ANALYST,
     STEP_PLAN,
@@ -69,21 +71,34 @@ async def researcher_node(
     *,
     llm: LLMClient,
     role_registry: dict[str, RoleConfig] | None = None,
+    mcp_client: MCPClient | None = None,
 ) -> dict[str, Any]:
     registry = role_registry or ROLE_REGISTRY
+    role = registry.get("researcher")
     researcher = ResearcherAgent()
     plan = state.get("plan") or {}
-    result = await researcher.research(
+    tools = await resolve_role_tools(role, mcp_client=mcp_client) if role and mcp_client else []
+    result, tool_calls = await researcher.research(
         state["user_query"],
         task_id=UUID(state["task_id"]),
         llm=llm,
         subtask=plan.get("researcher"),
-        role=registry.get("researcher"),
+        role=role,
+        mcp_client=mcp_client,
+        tools=tools,
     )
+    existing_tool_calls = list(state.get("tool_calls", []))
+    tagged_tool_calls = [
+        call.model_copy(update={"step_name": STEP_RESEARCHER}) for call in tool_calls
+    ]
     return {
         "research_notes": list(result.notes),
         "sources": list(result.sources),
         "current_step": STEP_RESEARCHER,
+        "tool_calls": [
+            *existing_tool_calls,
+            *[call.model_dump(mode="json") for call in tagged_tool_calls],
+        ],
     }
 
 
@@ -92,21 +107,34 @@ async def analyst_node(
     *,
     llm: LLMClient,
     role_registry: dict[str, RoleConfig] | None = None,
+    mcp_client: MCPClient | None = None,
 ) -> dict[str, Any]:
     registry = role_registry or ROLE_REGISTRY
+    role = registry.get("analyst")
     analyst = AnalystAgent()
     plan = state.get("plan") or {}
-    result = await analyst.analyze(
+    tools = await resolve_role_tools(role, mcp_client=mcp_client) if role and mcp_client else []
+    result, tool_calls = await analyst.analyze(
         state["user_query"],
         task_id=UUID(state["task_id"]),
         llm=llm,
         research_notes=list(state.get("research_notes", [])),
         subtask=plan.get("analyst"),
-        role=registry.get("analyst"),
+        role=role,
+        mcp_client=mcp_client,
+        tools=tools,
     )
+    existing_tool_calls = list(state.get("tool_calls", []))
+    tagged_tool_calls = [
+        call.model_copy(update={"step_name": STEP_ANALYST}) for call in tool_calls
+    ]
     return {
         "analysis": result.analysis,
         "current_step": STEP_ANALYST,
+        "tool_calls": [
+            *existing_tool_calls,
+            *[call.model_dump(mode="json") for call in tagged_tool_calls],
+        ],
     }
 
 

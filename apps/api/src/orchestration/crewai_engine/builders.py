@@ -3,9 +3,10 @@
 Each role's `RoleConfig.instructions` and `expected_output` schema are baked
 into the Task description as an explicit JSON-response instruction, mirroring
 `llm.openai_compatible.OpenAICompatibleClient.chat_structured`'s prompt-based
-structured output technique (see `parsing.py`). This keeps CrewAI Agents free
-of tools/function-calling requirements while still producing schemas that are
-comparable to the LangGraph engine's structured node outputs.
+structured output technique (see `parsing.py`). Tool-calling (when the role
+has a `tool_allowlist`) is handled entirely inside `CrewAILLMBridge.call()`
+via the shared `agents.tool_loop`, not CrewAI's native `Agent(tools=...)`
+mechanism, so `Agent` here intentionally never receives a `tools=` argument.
 """
 
 from __future__ import annotations

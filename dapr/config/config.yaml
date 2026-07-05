@@ -15,3 +15,9 @@ spec:
     stateStoreName: statestore
   workflow:
     stateStoreName: statestore
+  # No `accessControl` policy is configured, so Dapr defaults to allowing
+  # every Service Invocation call between sidecars sharing this config,
+  # including `api`/`worker` -> `mcp-server` (AGENTS.md section 9). This is
+  # acceptable for the course-scope Docker Compose network, which is not
+  # exposed beyond localhost; tightening this to an explicit allowlist is a
+  # documented follow-up (see README "已知限制").

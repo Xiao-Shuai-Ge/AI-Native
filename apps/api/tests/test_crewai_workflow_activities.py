@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -12,7 +13,9 @@ from dapr.ext.workflow import WorkflowActivityContext
 
 from llm.fake import FakeLLMClient
 from llm.protocol import ChatMessage, ChatResponse
+from orchestration.models import ToolCallRecord
 from workflows.activities.task_activities import (
+    _commit_crewai_step,
     _run_crewai_analyst_impl,
     _run_crewai_researcher_impl,
     _run_crewai_writer_impl,
@@ -21,6 +24,7 @@ from workflows.activities.task_activities import (
 from workflows.models import (
     CrewAIAnalystInput,
     CrewAIResearcherInput,
+    CrewAIResearcherResult,
     CrewAIWriterInput,
     SelectEngineInput,
 )
@@ -172,6 +176,40 @@ async def test_run_crewai_researcher_executes_and_records_step(
     assert result.notes == ["note a"]
     mock_repo.record_step.assert_awaited_once()
     activity_runtime.event_publisher.publish.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_commit_crewai_step_persists_json_safe_output(
+    activity_runtime: ActivityRuntime,
+) -> None:
+    task_id = uuid4()
+    started_at = datetime(2026, 7, 5, 7, 12, tzinfo=UTC)
+    result = CrewAIResearcherResult(
+        notes=["note a"],
+        tool_calls=[
+            ToolCallRecord(
+                tool_name="web_search",
+                arguments={"query": "Dapr Workflow"},
+                started_at=started_at,
+            )
+        ],
+    )
+    mock_repo = AsyncMock()
+    mock_repo.record_step.return_value = MagicMock()
+
+    with patch("workflows.activities.task_activities.TaskRepository", return_value=mock_repo):
+        committed = await _commit_crewai_step(
+            task_id=task_id,
+            step_name="researcher",
+            engine="crewai",
+            idempotency_key=f"{task_id}:researcher:crewai",
+            result=result,
+            result_type=CrewAIResearcherResult,
+        )
+
+    assert committed == result
+    output_json = mock_repo.record_step.await_args.kwargs["output_json"]
+    assert output_json["tool_calls"][0]["started_at"] == "2026-07-05T07:12:00Z"
 
 
 @pytest.mark.asyncio

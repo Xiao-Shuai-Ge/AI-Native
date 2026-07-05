@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from llm.adapters.anthropic import AnthropicClient
 from llm.errors import LLMTimeoutError, LLMUnavailableError
 from llm.openai_compatible import OpenAICompatibleClient
-from llm.protocol import ChatMessage, ChatResponse, LLMProviderInfo
+from llm.protocol import ChatMessage, ChatResponse, LLMProviderInfo, ToolDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +48,14 @@ class ResilientLLMClient:
         *,
         timeout: float | None = None,
         task_id: str | None = None,
+        tools: list[ToolDefinition] | None = None,
     ) -> ChatResponse:
         effective_timeout = timeout if timeout is not None else self._default_timeout
         return await self._execute_with_resilience(
             operation="chat",
             task_id=task_id,
             timeout=effective_timeout,
-            call=lambda: self._inner.chat(messages, timeout=effective_timeout),
+            call=lambda: self._inner.chat(messages, timeout=effective_timeout, tools=tools),
         )
 
     async def chat_structured(

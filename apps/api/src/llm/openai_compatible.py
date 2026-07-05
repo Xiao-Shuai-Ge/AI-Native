@@ -1,4 +1,12 @@
-"""OpenAI-compatible chat completions client."""
+"""Shared adapter for DeepSeek, Ollama and OpenAI compatible endpoints.
+
+Delegates the actual HTTP call to `litellm.acompletion` (see
+`llm/litellm_support.py`) so tool-calling is parsed the same, litellm-
+normalized way across every provider instead of hand-rolled per-provider
+JSON parsing. The `model` string is prefixed with `openai/` so litellm
+targets the given `base_url` as a generic OpenAI-compatible endpoint,
+matching this adapter's previous direct-httpx behavior byte-for-byte.
+"""
 
 from __future__ import annotations
 
@@ -6,33 +14,22 @@ import json
 import logging
 from typing import Any, TypeVar
 
-import httpx
 from pydantic import BaseModel, ValidationError
 
-from llm.errors import LLMParseError, LLMUnavailableError
+from llm.errors import LLMParseError
+from llm.litellm_support import call_litellm, parse_litellm_response
 from llm.protocol import (
     ChatMessage,
     ChatResponse,
     ChatRole,
     LLMCapabilities,
     LLMProviderInfo,
-    TokenUsage,
+    ToolDefinition,
 )
 
 logger = logging.getLogger(__name__)
 
 StructuredT = TypeVar("StructuredT", bound=BaseModel)
-
-
-def _chat_completions_url(base_url: str) -> str:
-    normalized = base_url.rstrip("/")
-    if normalized.endswith("/v1"):
-        return f"{normalized}/chat/completions"
-    return f"{normalized}/v1/chat/completions"
-
-
-def _to_openai_messages(messages: list[ChatMessage]) -> list[dict[str, str]]:
-    return [{"role": message.role.value, "content": message.content} for message in messages]
 
 
 class OpenAICompatibleClient:
@@ -46,7 +43,6 @@ class OpenAICompatibleClient:
         base_url: str,
         api_key: str | None,
         capabilities: LLMCapabilities,
-        http_client: httpx.AsyncClient | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> None:
         self._provider = provider
@@ -54,8 +50,6 @@ class OpenAICompatibleClient:
         self._base_url = base_url
         self._api_key = api_key
         self._capabilities = capabilities
-        self._http_client = http_client
-        self._owns_client = http_client is None
         self._extra_body = extra_body or {}
         self._provider_info = LLMProviderInfo(
             provider=provider,
@@ -67,35 +61,26 @@ class OpenAICompatibleClient:
     def provider_info(self) -> LLMProviderInfo:
         return self._provider_info
 
-    async def _get_client(self) -> httpx.AsyncClient:
-        if self._http_client is None:
-            self._http_client = httpx.AsyncClient()
-        return self._http_client
-
     async def aclose(self) -> None:
-        if self._owns_client and self._http_client is not None:
-            await self._http_client.aclose()
-            self._http_client = None
-
-    def _headers(self) -> dict[str, str]:
-        headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
-        return headers
+        """No-op: litellm manages its own connection pooling internally."""
 
     async def chat(
         self,
         messages: list[ChatMessage],
         *,
         timeout: float,
+        tools: list[ToolDefinition] | None = None,
     ) -> ChatResponse:
-        body: dict[str, Any] = {
-            "model": self._model,
-            "messages": _to_openai_messages(messages),
-            **self._extra_body,
-        }
-        payload = await self._post_chat_completions(body, timeout=timeout)
-        return self._parse_chat_response(payload)
+        response = await call_litellm(
+            model=f"openai/{self._model}",
+            messages=messages,
+            timeout=timeout,
+            api_key=self._api_key or "not-needed",
+            base_url=self._base_url,
+            tools=tools,
+            extra_body=self._extra_body or None,
+        )
+        return parse_litellm_response(response, fallback_model=self._model)
 
     async def chat_structured(
         self,
@@ -116,84 +101,16 @@ class OpenAICompatibleClient:
                 ),
             ),
         )
-        body: dict[str, Any] = {
-            "model": self._model,
-            "messages": _to_openai_messages(structured_messages),
-            "response_format": {"type": "json_object"},
-            **self._extra_body,
-        }
-        payload = await self._post_chat_completions(body, timeout=timeout)
-        response = self._parse_chat_response(payload)
-        return self._parse_structured_content(response.content, schema)
-
-    async def _post_chat_completions(
-        self,
-        body: dict[str, Any],
-        *,
-        timeout: float,
-    ) -> dict[str, Any]:
-        client = await self._get_client()
-        url = _chat_completions_url(self._base_url)
-        try:
-            response = await client.post(
-                url,
-                headers=self._headers(),
-                json=body,
-                timeout=timeout,
-            )
-        except httpx.TimeoutException as exc:
-            raise LLMUnavailableError("LLM request timed out at transport layer") from exc
-        except httpx.HTTPError as exc:
-            raise LLMUnavailableError("LLM request failed at transport layer") from exc
-
-        if response.status_code >= 400:
-            raise LLMUnavailableError(
-                f"LLM provider returned HTTP {response.status_code}: {response.text[:200]}"
-            )
-
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise LLMUnavailableError("LLM provider returned invalid JSON") from exc
-
-        if not isinstance(payload, dict):
-            raise LLMUnavailableError("LLM provider returned unexpected payload")
-        return payload
-
-    def _parse_chat_response(self, payload: dict[str, Any]) -> ChatResponse:
-        choices = payload.get("choices")
-        if not isinstance(choices, list) or not choices:
-            raise LLMUnavailableError("LLM provider returned no choices")
-
-        first_choice = choices[0]
-        if not isinstance(first_choice, dict):
-            raise LLMUnavailableError("LLM provider returned invalid choice payload")
-
-        message = first_choice.get("message")
-        if not isinstance(message, dict):
-            raise LLMUnavailableError("LLM provider returned invalid message payload")
-
-        content = message.get("content")
-        if not isinstance(content, str):
-            raise LLMUnavailableError("LLM provider returned empty content")
-
-        usage_payload = payload.get("usage")
-        usage: TokenUsage | None = None
-        if isinstance(usage_payload, dict):
-            usage = TokenUsage(
-                prompt_tokens=usage_payload.get("prompt_tokens"),
-                completion_tokens=usage_payload.get("completion_tokens"),
-                total_tokens=usage_payload.get("total_tokens"),
-            )
-
-        model = payload.get("model")
-        finish_reason = first_choice.get("finish_reason")
-        return ChatResponse(
-            content=content,
-            model=model if isinstance(model, str) else self._model,
-            usage=usage,
-            finish_reason=finish_reason if isinstance(finish_reason, str) else None,
+        response = await call_litellm(
+            model=f"openai/{self._model}",
+            messages=structured_messages,
+            timeout=timeout,
+            api_key=self._api_key or "not-needed",
+            base_url=self._base_url,
+            extra_body={**self._extra_body, "response_format": {"type": "json_object"}},
         )
+        parsed = parse_litellm_response(response, fallback_model=self._model)
+        return self._parse_structured_content(parsed.content, schema)
 
     def _parse_structured_content(self, content: str, schema: type[StructuredT]) -> StructuredT:
         try:

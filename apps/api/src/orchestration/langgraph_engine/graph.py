@@ -23,6 +23,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from agents.roles import ROLE_REGISTRY, RoleConfig
 from llm.protocol import LLMClient
+from mcp_client.client import MCPClient
 from orchestration.langgraph_engine.nodes import (
     analyst_node,
     plan_node,
@@ -93,6 +94,7 @@ def build_graph(
     on_node_complete: NodeEventCallback | None = None,
     persist_result: ResultPersister | None = None,
     role_registry: dict[str, RoleConfig] | None = None,
+    mcp_client: MCPClient | None = None,
 ) -> CompiledStateGraph[GraphState, None, GraphState, GraphState]:
     registry = role_registry or ROLE_REGISTRY
     graph: StateGraph[GraphState] = StateGraph(GraphState)
@@ -115,7 +117,9 @@ def build_graph(
         STEP_RESEARCHER,
         _with_event(
             STEP_RESEARCHER,
-            functools.partial(researcher_node, llm=llm, role_registry=registry),
+            functools.partial(
+                researcher_node, llm=llm, role_registry=registry, mcp_client=mcp_client
+            ),
             on_node_complete,
         ),
     )
@@ -123,7 +127,7 @@ def build_graph(
         STEP_ANALYST,
         _with_event(
             STEP_ANALYST,
-            functools.partial(analyst_node, llm=llm, role_registry=registry),
+            functools.partial(analyst_node, llm=llm, role_registry=registry, mcp_client=mcp_client),
             on_node_complete,
         ),
     )
