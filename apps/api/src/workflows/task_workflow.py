@@ -7,7 +7,6 @@ from collections.abc import Generator
 from typing import Any
 
 from dapr.ext.workflow import DaprWorkflowContext
-
 from pydantic import BaseModel
 
 from orchestration.models import EngineChoice

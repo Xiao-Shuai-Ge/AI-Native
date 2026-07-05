@@ -34,7 +34,4 @@ def tool_call_idempotency_key(
     started = call.started_at.isoformat() if call.started_at is not None else "unknown"
     args_blob = json.dumps(call.arguments, sort_keys=True, default=str)
     args_hash = hashlib.sha256(args_blob.encode()).hexdigest()[:16]
-    return (
-        f"{task_id}:{effective_step}:{engine_suffix}:"
-        f"{call.tool_name}:{started}:{args_hash}"
-    )
+    return f"{task_id}:{effective_step}:{engine_suffix}:{call.tool_name}:{started}:{args_hash}"

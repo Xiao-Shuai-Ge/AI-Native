@@ -22,10 +22,7 @@ WRITER_ROLE = RoleConfig(
     role="技术撰稿人",
     goal="为给定主题撰写简洁、准确的 Markdown 摘要。",
     backstory="你擅长将复杂技术话题转化为工程团队易读的摘要。",
-    instructions=(
-        "撰写简短标题、一段摘要，以及带标题与要点的 Markdown 正文。"
-        "保持客观，避免推测。"
-    ),
+    instructions=("撰写简短标题、一段摘要，以及带标题与要点的 Markdown 正文。保持客观，避免推测。"),
     version="v1",
     tool_allowlist=[],
 )
@@ -47,10 +44,7 @@ ANALYST_ROLE = RoleConfig(
     role="分析师",
     goal="将研究笔记转化为简短、结构化的分析。",
     backstory="你擅长将原始笔记综合为清晰结论与可行洞察。",
-    instructions=(
-        "根据问题及研究笔记，写出简洁分析段落，突出关键发现及其含义。"
-        "保持客观。"
-    ),
+    instructions=("根据问题及研究笔记，写出简洁分析段落，突出关键发现及其含义。保持客观。"),
     version="v1",
     tool_allowlist=["calculator", "readonly_sql"],
 )

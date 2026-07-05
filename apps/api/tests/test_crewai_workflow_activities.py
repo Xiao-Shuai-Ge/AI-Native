@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from dapr.ext.workflow import WorkflowActivityContext
 
 from llm.fake import FakeLLMClient
 from llm.protocol import ChatMessage, ChatResponse
@@ -81,7 +80,6 @@ def _fake_llm_for_schema(payload_by_schema_hint: dict[str, dict[str, object]]) -
 async def test_select_engine_persists_choice_and_publishes_event(
     activity_runtime: ActivityRuntime,
 ) -> None:
-    ctx = MagicMock(spec=WorkflowActivityContext)
     task_id = uuid4()
     step_input = SelectEngineInput(
         task_id=task_id,
@@ -118,7 +116,6 @@ async def test_select_engine_persists_choice_and_publishes_event(
 async def test_run_crewai_researcher_skips_when_already_recorded(
     activity_runtime: ActivityRuntime,
 ) -> None:
-    ctx = MagicMock(spec=WorkflowActivityContext)
     step_input = CrewAIResearcherInput(
         task_id=uuid4(),
         session_id=uuid4(),
@@ -151,7 +148,6 @@ async def test_run_crewai_researcher_skips_when_already_recorded(
 async def test_run_crewai_researcher_executes_and_records_step(
     activity_runtime: ActivityRuntime,
 ) -> None:
-    ctx = MagicMock(spec=WorkflowActivityContext)
     step_input = CrewAIResearcherInput(
         task_id=uuid4(),
         session_id=uuid4(),
@@ -263,7 +259,6 @@ async def test_run_crewai_researcher_uses_peer_output_when_persist_loses_race(
 async def test_run_crewai_analyst_executes_and_records_step(
     activity_runtime: ActivityRuntime,
 ) -> None:
-    ctx = MagicMock(spec=WorkflowActivityContext)
     step_input = CrewAIAnalystInput(
         task_id=uuid4(),
         session_id=uuid4(),
@@ -294,7 +289,6 @@ async def test_run_crewai_analyst_executes_and_records_step(
 async def test_run_crewai_writer_executes_records_and_updates_report(
     activity_runtime: ActivityRuntime,
 ) -> None:
-    ctx = MagicMock(spec=WorkflowActivityContext)
     step_input = CrewAIWriterInput(
         task_id=uuid4(),
         session_id=uuid4(),

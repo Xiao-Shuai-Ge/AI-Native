@@ -24,6 +24,7 @@ from langgraph.graph.state import CompiledStateGraph
 from agents.roles import ROLE_REGISTRY, RoleConfig
 from llm.protocol import LLMClient
 from mcp_client.client import MCPClient
+from observability.tracing import start_span
 from orchestration.langgraph_engine.nodes import (
     analyst_node,
     plan_node,
@@ -42,7 +43,6 @@ from orchestration.langgraph_engine.state import (
     GraphState,
     to_task_state,
 )
-from observability.tracing import start_span
 
 logger = logging.getLogger(__name__)
 

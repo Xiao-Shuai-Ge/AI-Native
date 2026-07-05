@@ -13,7 +13,11 @@ from orchestration.models import EngineChoice, TaskStatus
 from persistence.dapr_state import DaprStateStore
 from persistence.idempotency import step_idempotency_key
 from persistence.repository import TaskRepository
-from workflows.event_messages import step_finished_detail, task_started_detail, task_succeeded_detail
+from workflows.event_messages import (
+    step_finished_detail,
+    task_started_detail,
+    task_succeeded_detail,
+)
 
 logger = logging.getLogger(__name__)
 

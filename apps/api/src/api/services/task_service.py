@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -62,17 +63,20 @@ class TaskService:
             else self._default_delay_seconds
         )
 
-        with bind_task_context(
-            task_id=str(task_id),
-            engine=request.engine.value,
-            workflow_id=workflow_id,
-        ), start_span(
-            "task.create",
-            attributes={
-                "task_id": str(task_id),
-                "engine": request.engine.value,
-                "workflow_id": workflow_id,
-            },
+        with (
+            bind_task_context(
+                task_id=str(task_id),
+                engine=request.engine.value,
+                workflow_id=workflow_id,
+            ),
+            start_span(
+                "task.create",
+                attributes={
+                    "task_id": str(task_id),
+                    "engine": request.engine.value,
+                    "workflow_id": workflow_id,
+                },
+            ),
         ):
             return await self._create_task_impl(
                 request=request,
@@ -453,7 +457,7 @@ def _build_task_metrics(task: object, runtime: dict[str, object] | None) -> dict
     }
 
 
-def _latest_trace_id(events: object) -> str | None:
+def _latest_trace_id(events: Iterable[object]) -> str | None:
     for event in reversed(list(events)):
         payload = getattr(event, "payload", None)
         if not isinstance(payload, dict):

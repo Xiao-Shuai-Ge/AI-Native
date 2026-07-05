@@ -167,9 +167,7 @@ class TaskRepository:
 
     async def count_tool_calls(self, task_id: UUID) -> int:
         result = await self._session.execute(
-            select(func.count())
-            .select_from(ToolCallORM)
-            .where(ToolCallORM.task_id == task_id)
+            select(func.count()).select_from(ToolCallORM).where(ToolCallORM.task_id == task_id)
         )
         return int(result.scalar_one())
 

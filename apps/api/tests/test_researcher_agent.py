@@ -1,10 +1,10 @@
 """Researcher agent unit tests."""
 
+from contextlib import asynccontextmanager
 from typing import Any
 from uuid import uuid4
 
 import pytest
-from contextlib import asynccontextmanager
 
 from agents.researcher import ResearcherAgent
 from agents.schemas import ResearcherNotes

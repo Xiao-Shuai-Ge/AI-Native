@@ -9,6 +9,8 @@ import httpx
 import redis.asyncio as aioredis
 
 from api.config import Settings
+from mcp_client.errors import MCPToolError
+from mcp_client.factory import create_mcp_client
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +66,20 @@ async def check_dapr(settings: Settings) -> dict[str, Any]:
 
 
 async def check_mcp(settings: Settings) -> dict[str, Any]:
-    return {
-        "status": "skipped",
-        "detail": f"MCP server check deferred until Day 7 ({settings.mcp_server_url})",
-    }
+    try:
+        client = create_mcp_client(settings)
+        tools = await asyncio.wait_for(client.discover_tools(), timeout=3.0)
+    except MCPToolError as exc:
+        logger.warning("mcp readiness check failed", extra={"error": exc.message})
+        return {"status": "error", "detail": exc.code.value}
+    except Exception as exc:
+        logger.warning("mcp readiness check failed", extra={"error": str(exc)})
+        return {"status": "error", "detail": str(exc)}
+
+    tool_count = len(tools)
+    if tool_count >= 4:
+        return {"status": "ok", "detail": f"{tool_count} tools discovered"}
+    return {"status": "error", "detail": f"expected at least 4 tools, got {tool_count}"}
 
 
 async def run_readiness_checks(settings: Settings) -> dict[str, Any]:
@@ -83,7 +95,9 @@ async def run_readiness_checks(settings: Settings) -> dict[str, Any]:
         "dapr": dapr_result,
         "mcp": mcp_result,
     }
-    required_ok = all(checks[name]["status"] == "ok" for name in ("redis", "postgres"))
+    required_ok = all(
+        checks[name]["status"] == "ok" for name in ("redis", "postgres", "dapr", "mcp")
+    )
     return {
         "status": "ready" if required_ok else "not_ready",
         "checks": checks,

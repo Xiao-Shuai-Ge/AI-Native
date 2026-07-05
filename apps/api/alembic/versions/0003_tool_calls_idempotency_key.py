@@ -13,9 +13,7 @@ def upgrade() -> None:
     op.add_column("tool_calls", sa.Column("idempotency_key", sa.String(length=256), nullable=True))
     op.execute("UPDATE tool_calls SET idempotency_key = id::text WHERE idempotency_key IS NULL")
     op.alter_column("tool_calls", "idempotency_key", nullable=False)
-    op.create_unique_constraint(
-        "uq_tool_calls_idempotency_key", "tool_calls", ["idempotency_key"]
-    )
+    op.create_unique_constraint("uq_tool_calls_idempotency_key", "tool_calls", ["idempotency_key"])
 
 
 def downgrade() -> None:

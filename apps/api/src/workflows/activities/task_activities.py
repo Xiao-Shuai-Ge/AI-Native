@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import TypeVar
 from uuid import UUID
 
 from dapr.ext.workflow import WorkflowActivityContext
@@ -65,10 +64,11 @@ from workflows.sync_runtime import ActivityRuntime, get_activity_runtime, run_as
 
 logger = logging.getLogger(__name__)
 
-TModel = TypeVar("TModel", bound=BaseModel)
 
-
-def _coerce_input(model: type[TModel], value: TModel | dict[str, object]) -> TModel:
+def _coerce_input[TModel: BaseModel](
+    model: type[TModel],
+    value: TModel | dict[str, object],
+) -> TModel:
     if isinstance(value, model):
         return value
     return model.model_validate(value)
@@ -345,7 +345,7 @@ async def _execute_step_impl(step_input: StepActivityInput) -> ActivityStepResul
             task_id=task_id,
             step_name=step_name,
             status=step_input.step_status,
-                output_json={"detail": f"{step_name} 占位输出"},
+            output_json={"detail": f"{step_name} 占位输出"},
             idempotency_key=idempotency_key,
         )
         await session.commit()

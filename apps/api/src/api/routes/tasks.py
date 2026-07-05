@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import AsyncIterator
+from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -128,7 +129,7 @@ async def pause_task(task_id: UUID, request: Request) -> TaskControlResponse:
 
 
 def _event_broadcaster(request: Request) -> TaskEventBroadcaster:
-    return request.app.state.app_state.event_broadcaster
+    return cast("TaskEventBroadcaster", request.app.state.app_state.event_broadcaster)
 
 
 def _format_sse(event: str, data: dict[str, object]) -> str:

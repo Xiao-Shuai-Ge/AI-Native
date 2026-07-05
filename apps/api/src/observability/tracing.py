@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from opentelemetry import trace
+from opentelemetry.context import attach, detach
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.propagate import extract, inject
 from opentelemetry.sdk.resources import Resource
@@ -66,11 +67,11 @@ def attach_trace_context(traceparent: str | None) -> Iterator[None]:
     if carrier is None:
         yield
         return
-    token = trace.context_api.attach(extract(carrier))
+    token = attach(extract(carrier))
     try:
         yield
     finally:
-        trace.context_api.detach(token)
+        detach(token)
 
 
 @contextmanager

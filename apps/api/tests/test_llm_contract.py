@@ -78,7 +78,9 @@ async def test_openai_compatible_adapters_contract(
     request_model: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mock_acompletion = AsyncMock(return_value=fake_litellm_response("hello world", model=request_model))
+    mock_acompletion = AsyncMock(
+        return_value=fake_litellm_response("hello world", model=request_model)
+    )
     monkeypatch.setattr("llm.litellm_support.litellm.acompletion", mock_acompletion)
 
     client = factory()
@@ -126,7 +128,9 @@ async def test_openai_compatible_adapter_forwards_tool_calls(
     mock_acompletion = AsyncMock(
         return_value=fake_litellm_response(
             "",
-            tool_calls=[{"id": "call-1", "name": "calculator", "arguments": '{"expression": "1+1"}'}],
+            tool_calls=[
+                {"id": "call-1", "name": "calculator", "arguments": '{"expression": "1+1"}'}
+            ],
             finish_reason="tool_calls",
         )
     )

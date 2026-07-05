@@ -29,7 +29,10 @@ async def test_list_tools_returns_discovered_tools(monkeypatch: pytest.MonkeyPat
             MCPToolInfo(name="web_search", description="search", input_schema={}),
         ]
     )
-    monkeypatch.setattr("api.routes.tools.create_mcp_client", lambda _settings: fake_client)
+    monkeypatch.setattr(
+        "api.routes.tools.create_mcp_client",
+        lambda _settings, trace_headers=None: fake_client,
+    )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -48,7 +51,10 @@ async def test_list_tools_returns_503_when_mcp_server_unavailable(
     fake_client = _FakeMCPClient(
         error=MCPToolError(MCPToolErrorCode.INTERNAL_ERROR, "connection refused")
     )
-    monkeypatch.setattr("api.routes.tools.create_mcp_client", lambda _settings: fake_client)
+    monkeypatch.setattr(
+        "api.routes.tools.create_mcp_client",
+        lambda _settings, trace_headers=None: fake_client,
+    )
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

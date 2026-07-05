@@ -42,15 +42,18 @@ class AgentTaskEventPublisher:
             updates["traceparent"] = traceparent
         if updates:
             event = event.model_copy(update=updates)
-        with bind_task_context(task_id=str(event.task_id), engine=event.engine), start_span(
-            "pubsub.agent_task_event",
-            attributes={
-                "task_id": str(event.task_id),
-                "engine": event.engine,
-                "step": event.step,
-                "status": event.status,
-                "trace_id": event.trace_id,
-            },
+        with (
+            bind_task_context(task_id=str(event.task_id), engine=event.engine),
+            start_span(
+                "pubsub.agent_task_event",
+                attributes={
+                    "task_id": str(event.task_id),
+                    "engine": event.engine,
+                    "step": event.step,
+                    "status": event.status,
+                    "trace_id": event.trace_id,
+                },
+            ),
         ):
             data = event.model_dump(mode="json")
             await self._dapr.publish_event(self._topic, data)

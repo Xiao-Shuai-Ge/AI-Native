@@ -53,9 +53,12 @@ class SettingsService:
         }
 
     async def get_settings(self) -> RuntimeSettingsResponse:
-        stored = await self._dapr.get_state(RUNTIME_SETTINGS_KEY) or {}
-        llm_data = stored.get("llm") if isinstance(stored.get("llm"), dict) else {}
-        agents_data = stored.get("agents") if isinstance(stored.get("agents"), dict) else {}
+        stored_raw = await self._dapr.get_state(RUNTIME_SETTINGS_KEY)
+        stored = stored_raw if isinstance(stored_raw, dict) else {}
+        llm_raw = stored.get("llm")
+        agents_raw = stored.get("agents")
+        llm_data = llm_raw if isinstance(llm_raw, dict) else {}
+        agents_data = agents_raw if isinstance(agents_raw, dict) else {}
 
         llm_payload: dict[str, Any] = {**self._default_llm().model_dump(), **llm_data}
         try:

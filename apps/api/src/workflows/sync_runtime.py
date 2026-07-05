@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Coroutine
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -86,7 +88,7 @@ def get_activity_runtime() -> ActivityRuntime:
     return _runtime
 
 
-def run_async(coro: object) -> object:
+def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
     """Run an async coroutine on the worker's dedicated event loop."""
     runtime = get_activity_runtime()
     if not asyncio.iscoroutine(coro):

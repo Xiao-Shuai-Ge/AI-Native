@@ -1,0 +1,152 @@
+{
+  "generated_at": "2026-07-05T11:47:40Z",
+  "ok": true,
+  "results": [
+    {
+      "name": "api startup",
+      "ok": true,
+      "detail": "health endpoint is ready",
+      "data": {
+        "status": "ok"
+      }
+    },
+    {
+      "name": "/health",
+      "ok": true,
+      "detail": "HTTP 200",
+      "data": {
+        "status": "ok"
+      }
+    },
+    {
+      "name": "/ready",
+      "ok": true,
+      "detail": "HTTP 200",
+      "data": {
+        "status": "ready",
+        "checks": {
+          "redis": {
+            "status": "ok"
+          },
+          "postgres": {
+            "status": "ok"
+          },
+          "dapr": {
+            "status": "ok"
+          },
+          "mcp": {
+            "status": "ok",
+            "detail": "4 tools discovered"
+          }
+        }
+      }
+    },
+    {
+      "name": "/api/providers",
+      "ok": true,
+      "detail": "HTTP 200",
+      "data": {
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "capabilities": {
+          "supports_streaming": false,
+          "supports_tools": true,
+          "supports_structured_output": true,
+          "max_context_tokens": 65536
+        }
+      }
+    },
+    {
+      "name": "mcp tools",
+      "ok": true,
+      "detail": "HTTP 200; discovered=['calculator', 'code_runner', 'readonly_sql', 'web_search']",
+      "data": {
+        "tools": [
+          {
+            "name": "calculator",
+            "description": "计算白名单内的算术表达式（不执行任意代码）。",
+            "input_schema": {
+              "properties": {
+                "expression": {
+                  "title": "Expression",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "expression"
+              ],
+              "title": "calculatorArguments",
+              "type": "object"
+            }
+          },
+          {
+            "name": "web_search",
+            "description": "使用 Bocha/LangSearch 搜索网络，返回最多 5 条标题、摘要与 URL。",
+            "input_schema": {
+              "properties": {
+                "query": {
+                  "title": "Query",
+                  "type": "string"
+                },
+                "max_results": {
+                  "default": 5,
+                  "title": "Max Results",
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "title": "web_searchArguments",
+              "type": "object"
+            }
+          },
+          {
+            "name": "code_runner",
+            "description": "在隔离、无网络的沙箱容器中运行简短的 Python 或 Shell 代码片段。仅用于小型数据处理或计算。",
+            "input_schema": {
+              "properties": {
+                "language": {
+                  "title": "Language",
+                  "type": "string"
+                },
+                "code": {
+                  "title": "Code",
+                  "type": "string"
+                },
+                "timeout_seconds": {
+                  "default": 5.0,
+                  "title": "Timeout Seconds",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "language",
+                "code"
+              ],
+              "title": "code_runnerArguments",
+              "type": "object"
+            }
+          },
+          {
+            "name": "readonly_sql",
+            "description": "对演示知识库执行单条只读 SELECT 查询。",
+            "input_schema": {
+              "properties": {
+                "query": {
+                  "title": "Query",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "query"
+              ],
+              "title": "readonly_sqlArguments",
+              "type": "object"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

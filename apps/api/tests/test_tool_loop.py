@@ -144,14 +144,20 @@ async def test_run_tool_loop_stops_at_max_rounds() -> None:
 
 @pytest.mark.asyncio
 async def test_run_tool_loop_rejects_tool_outside_allowlist() -> None:
-    tool_call = ToolCall(id="call-1", name="code_runner", arguments={"language": "python", "code": "1"})
+    tool_call = ToolCall(
+        id="call-1",
+        name="code_runner",
+        arguments={"language": "python", "code": "1"},
+    )
     llm = FakeLLMClient(
         chat_responses=[
             ChatResponse(content="", tool_calls=[tool_call]),
             ChatResponse(content="Cannot run that tool."),
         ]
     )
-    mcp_client = FakeMCPClient(call_results={"code_runner": {"stdout": "ok", "stderr": "", "exit_code": 0}})
+    mcp_client = FakeMCPClient(
+        call_results={"code_runner": {"stdout": "ok", "stderr": "", "exit_code": 0}}
+    )
     tools = [ToolDefinition(name="calculator", description="math", parameters={})]
 
     result = await run_tool_loop(

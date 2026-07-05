@@ -18,6 +18,7 @@ from agents.tool_loop import resolve_role_tools
 from agents.writer import WriterAgent
 from llm.protocol import LLMClient
 from mcp_client.client import MCPClient
+from observability.activity import log_behavior
 from orchestration.langgraph_engine.state import (
     STEP_ANALYST,
     STEP_PLAN,
@@ -26,7 +27,6 @@ from orchestration.langgraph_engine.state import (
     STEP_WRITER,
     GraphState,
 )
-from observability.activity import log_behavior
 
 _DEFAULT_ROLE_SUBSET = ("writer",)
 
@@ -133,9 +133,7 @@ async def analyst_node(
         tools=tools,
     )
     existing_tool_calls = list(state.get("tool_calls", []))
-    tagged_tool_calls = [
-        call.model_copy(update={"step_name": STEP_ANALYST}) for call in tool_calls
-    ]
+    tagged_tool_calls = [call.model_copy(update={"step_name": STEP_ANALYST}) for call in tool_calls]
     return {
         "analysis": result.analysis,
         "current_step": STEP_ANALYST,

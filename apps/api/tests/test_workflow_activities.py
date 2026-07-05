@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from dapr.ext.workflow import WorkflowActivityContext
 from pydantic import BaseModel
 
 from agents.schemas import PlanOutput, WriterSummary
@@ -20,11 +19,7 @@ from workflows.activities.task_activities import (
     _finalize_task_impl,
     _initialize_task_impl,
     _mark_task_failed_impl,
-    _run_crewai_analyst_impl,
-    _run_crewai_researcher_impl,
-    _run_crewai_writer_impl,
     _run_langgraph_graph_impl,
-    _select_engine_impl,
 )
 from workflows.models import (
     DelayedStepInput,
@@ -104,8 +99,6 @@ def _task_record(wf_input: TaskWorkflowInput, *, status: str) -> TaskRecord:
 @pytest.mark.asyncio
 async def test_initialize_task_updates_status(activity_runtime: ActivityRuntime) -> None:
     wf_input = _wf_input()
-    ctx = MagicMock(spec=WorkflowActivityContext)
-
     mock_repo = AsyncMock()
     mock_repo.get_task.return_value = _task_record(wf_input, status=TaskStatus.QUEUED.value)
     mock_repo.update_task_status = AsyncMock()
@@ -121,7 +114,6 @@ async def test_initialize_task_updates_status(activity_runtime: ActivityRuntime)
 @pytest.mark.asyncio
 async def test_execute_step_is_idempotent(activity_runtime: ActivityRuntime) -> None:
     wf_input = _wf_input()
-    ctx = MagicMock(spec=WorkflowActivityContext)
     step_input = StepActivityInput(
         task_id=wf_input.task_id,
         session_id=wf_input.session_id,
@@ -147,8 +139,6 @@ async def test_initialize_task_skips_when_already_running(
     activity_runtime: ActivityRuntime,
 ) -> None:
     wf_input = _wf_input()
-    ctx = MagicMock(spec=WorkflowActivityContext)
-
     mock_repo = AsyncMock()
     mock_repo.get_task.return_value = _task_record(wf_input, status=TaskStatus.RUNNING.value)
 
@@ -175,8 +165,6 @@ async def test_finalize_task_skips_when_already_succeeded(
     activity_runtime: ActivityRuntime,
 ) -> None:
     wf_input = _wf_input()
-    ctx = MagicMock(spec=WorkflowActivityContext)
-
     mock_repo = AsyncMock()
     record = _task_record(wf_input, status=TaskStatus.SUCCEEDED.value)
     record.report = "existing report"
@@ -193,7 +181,6 @@ async def test_finalize_task_skips_when_already_succeeded(
 @pytest.mark.asyncio
 async def test_delayed_step_skips_sleep_when_step_exists(activity_runtime: ActivityRuntime) -> None:
     wf_input = _wf_input()
-    ctx = MagicMock(spec=WorkflowActivityContext)
     step_input = DelayedStepInput(
         task_id=wf_input.task_id,
         session_id=wf_input.session_id,
@@ -218,7 +205,6 @@ async def test_delayed_step_skips_sleep_when_step_exists(activity_runtime: Activ
 @pytest.mark.asyncio
 async def test_mark_task_failed_from_paused(activity_runtime: ActivityRuntime) -> None:
     wf_input = _wf_input()
-    ctx = MagicMock(spec=WorkflowActivityContext)
     failure_input = TaskFailureInput(task_id=wf_input.task_id, error="boom")
 
     mock_repo = AsyncMock()
@@ -235,8 +221,6 @@ async def test_mark_task_failed_from_paused(activity_runtime: ActivityRuntime) -
 @pytest.mark.asyncio
 async def test_finalize_task_writes_report(activity_runtime: ActivityRuntime) -> None:
     wf_input = _wf_input()
-    ctx = MagicMock(spec=WorkflowActivityContext)
-
     mock_repo = AsyncMock()
     mock_repo.get_task.return_value = _task_record(wf_input, status=TaskStatus.RUNNING.value)
     mock_repo.update_task_status = AsyncMock()
@@ -253,8 +237,6 @@ async def test_finalize_task_uses_real_report_when_provided(
     activity_runtime: ActivityRuntime,
 ) -> None:
     wf_input = _wf_input()
-    ctx = MagicMock(spec=WorkflowActivityContext)
-
     mock_repo = AsyncMock()
     mock_repo.get_task.return_value = _task_record(wf_input, status=TaskStatus.RUNNING.value)
     mock_repo.update_task_status = AsyncMock()
@@ -270,7 +252,6 @@ async def test_run_langgraph_graph_executes_full_graph_and_publishes_node_events
     activity_runtime: ActivityRuntime,
 ) -> None:
     wf_input = _wf_input()
-    ctx = MagicMock(spec=WorkflowActivityContext)
     step_input = LangGraphStepInput(
         task_id=wf_input.task_id,
         session_id=wf_input.session_id,

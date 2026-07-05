@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 
 _task_id_var: ContextVar[str | None] = ContextVar("task_id", default=None)
 _engine_var: ContextVar[str | None] = ContextVar("engine", default=None)
@@ -44,7 +44,7 @@ def bind_task_context(
     engine: str | None = None,
     workflow_id: str | None = None,
 ) -> Iterator[None]:
-    tokens: list[tuple[ContextVar[str | None], object]] = []
+    tokens: list[tuple[ContextVar[str | None], Token[str | None]]] = []
     if task_id is not None:
         tokens.append((_task_id_var, _task_id_var.set(task_id)))
     if engine is not None:
