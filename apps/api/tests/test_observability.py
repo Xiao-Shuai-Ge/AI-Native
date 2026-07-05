@@ -18,6 +18,7 @@ from llm.protocol import TokenUsage
 from observability import metrics
 from observability.log_config import JsonFormatter, RedactingFilter, redact_text
 from observability.metrics_server import start_metrics_server
+from observability.task_tokens import merge_token_usage, token_usage_from_runtime
 from observability.tracing import setup_tracing, start_span
 
 
@@ -125,3 +126,26 @@ async def test_metrics_endpoint_exposes_observability_series(client: AsyncClient
         "tool_calls_total",
     ):
         assert metric_name in body
+
+
+def test_merge_token_usage_sums_known_fields() -> None:
+    first = TokenUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+    second = TokenUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5)
+    merged = merge_token_usage(merge_token_usage(None, first), second)
+    assert merged["prompt_tokens"] == 13
+    assert merged["completion_tokens"] == 7
+    assert merged["total_tokens"] == 20
+    assert merged["status"] == "known"
+
+
+def test_merge_token_usage_partial_when_fields_missing() -> None:
+    partial = TokenUsage(prompt_tokens=4, completion_tokens=None, total_tokens=None)
+    merged = merge_token_usage(None, partial)
+    assert merged["prompt_tokens"] == 4
+    assert merged["completion_tokens"] is None
+    assert merged["status"] == "partial"
+
+
+def test_token_usage_from_runtime_unknown_when_missing() -> None:
+    summary = token_usage_from_runtime(None)
+    assert summary["status"] == "unknown"

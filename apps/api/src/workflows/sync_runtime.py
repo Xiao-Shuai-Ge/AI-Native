@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from api.config import Settings, get_settings
 from events.schemas import AgentTaskEventPublisher
 from llm.protocol import LLMClient
+from observability.task_tokens import register_dapr_token_accumulator
 from persistence.dapr_client import DaprHttpClient
 from persistence.dapr_state import DaprStateStore
 from persistence.database import create_engine, create_session_factory
@@ -54,8 +55,13 @@ def init_activity_runtime(settings: Settings | None = None) -> ActivityRuntime:
         loop=loop,
         dapr_client=dapr_client,
     )
+    _register_worker_token_accumulator(_runtime)
     logger.info("activity runtime initialized")
     return _runtime
+
+
+def _register_worker_token_accumulator(runtime: ActivityRuntime) -> None:
+    register_dapr_token_accumulator(runtime.dapr_state)
 
 
 def get_activity_llm_client() -> LLMClient:

@@ -37,6 +37,8 @@ async def test_create_and_get_task(client: AsyncClient) -> None:
         detail = detail_response.json()
         assert detail["task_id"] == task_id
         assert detail["user_query"] == "Explain Dapr state management"
+        assert detail["metrics"]["tool_calls_total"] == 0
+        assert detail["metrics"]["token_usage"]["status"] == "unknown"
 
 
 @pytest.mark.integration
@@ -163,6 +165,38 @@ async def test_explicit_zero_delay_overrides_default() -> None:
     finally:
         state.workflow_scheduler.close()
         await state.engine.dispose()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_get_task_returns_metrics_from_runtime_state(client: AsyncClient) -> None:
+    runtime_state = {
+        "token_usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+            "status": "known",
+        }
+    }
+    with (
+        patch("workflows.client.WorkflowScheduler.schedule_task", new=AsyncMock()),
+        patch(
+            "persistence.dapr_state.DaprStateStore.get_task_runtime_state",
+            new=AsyncMock(return_value=runtime_state),
+        ),
+    ):
+        create_response = await client.post(
+            "/api/tasks",
+            json={"user_query": "metrics test", "engine": "langgraph"},
+        )
+        task_id = create_response.json()["task_id"]
+        detail_response = await client.get(f"/api/tasks/{task_id}")
+
+    assert detail_response.status_code == 200
+    metrics_payload = detail_response.json()["metrics"]
+    assert metrics_payload["tool_calls_total"] == 0
+    assert metrics_payload["token_usage"]["prompt_tokens"] == 100
+    assert metrics_payload["token_usage"]["status"] == "known"
 
 
 @pytest.mark.asyncio

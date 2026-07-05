@@ -9,9 +9,10 @@ from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from events.schemas import AgentTaskEvent, AgentTaskEventPublisher
-from orchestration.models import TaskRequest, TaskStatus
 from observability.context import bind_task_context
+from observability.task_tokens import token_usage_from_runtime
 from observability.tracing import inject_trace_headers, start_span
+from orchestration.models import TaskRequest, TaskStatus
 from persistence.dapr_state import DaprStateStore
 from persistence.ids import new_task_id, thread_id_for, workflow_id_for
 from persistence.repository import TaskRepository
@@ -353,6 +354,7 @@ class TaskService:
             )
         if runtime is not None:
             payload["runtime_state"] = runtime
+        payload["metrics"] = _build_task_metrics(task, runtime)
         return payload
 
     async def list_tasks(self, *, limit: int = 50, offset: int = 0) -> list[dict[str, object]]:
@@ -426,3 +428,37 @@ def _serialize_task(task: object) -> dict[str, object]:
             for call in task.tool_calls
         ],
     }
+
+
+def _build_task_metrics(task: object, runtime: dict[str, object] | None) -> dict[str, object]:
+    from persistence.models import TaskRecord
+
+    if not isinstance(task, TaskRecord):
+        msg = "expected TaskRecord"
+        raise TypeError(msg)
+
+    tool_calls = task.tool_calls
+    succeeded = sum(1 for call in tool_calls if not call.error)
+    failed = len(tool_calls) - succeeded
+    token_raw = runtime.get("token_usage") if runtime else None
+    token_usage = token_usage_from_runtime(token_raw)
+    trace_id = _latest_trace_id(task.audit_events)
+
+    return {
+        "tool_calls_total": len(tool_calls),
+        "tool_calls_succeeded": succeeded,
+        "tool_calls_failed": failed,
+        "token_usage": token_usage,
+        "trace_id": trace_id,
+    }
+
+
+def _latest_trace_id(events: object) -> str | None:
+    for event in reversed(list(events)):
+        payload = getattr(event, "payload", None)
+        if not isinstance(payload, dict):
+            continue
+        trace_id = payload.get("trace_id")
+        if isinstance(trace_id, str) and trace_id:
+            return trace_id
+    return None

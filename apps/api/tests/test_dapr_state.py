@@ -1,5 +1,6 @@
 """DaprStateStore unit tests."""
 
+import asyncio
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -43,3 +44,32 @@ async def test_merge_task_runtime_state_preserves_existing_fields(
     assert saved["user_preferences"] == {"language": "zh-CN"}
     assert saved["status"] == "running"
     assert saved["current_step"] == "plan"
+
+
+@pytest.mark.asyncio
+async def test_merge_task_runtime_state_serializes_concurrent_updates(
+    mock_client: DaprHttpClient,
+) -> None:
+    task_id = uuid4()
+    stored: dict[str, object] = {}
+
+    async def get_state_side_effect(_key: str) -> dict[str, object] | None:
+        await asyncio.sleep(0)
+        return dict(stored) if stored else None
+
+    async def save_state_side_effect(_key: str, value: dict[str, object]) -> None:
+        await asyncio.sleep(0)
+        stored.clear()
+        stored.update(value)
+
+    mock_client.get_state = AsyncMock(side_effect=get_state_side_effect)  # type: ignore[method-assign]
+    mock_client.save_state = AsyncMock(side_effect=save_state_side_effect)  # type: ignore[method-assign]
+    store = DaprStateStore(mock_client)
+
+    await asyncio.gather(
+        store.merge_task_runtime_state(task_id, {"token_usage": {"prompt_tokens": 10}}),
+        store.merge_task_runtime_state(task_id, {"current_step": "researcher"}),
+    )
+
+    assert stored["token_usage"] == {"prompt_tokens": 10}
+    assert stored["current_step"] == "researcher"

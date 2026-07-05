@@ -13,9 +13,10 @@ from tests.llm_helpers import fake_litellm_response
 
 from llm.adapters.openai_adapter import create_openai_client
 from llm.errors import LLMConfigurationError, LLMTimeoutError
-from llm.protocol import ChatMessage, ChatRole
+from llm.protocol import ChatMessage, ChatRole, TokenUsage
 from llm.resilient import ResilientLLMClient
 from observability import metrics
+from observability.task_tokens import clear_token_accumulator, register_token_accumulator
 
 
 class _SampleStructuredOutput(BaseModel):
@@ -135,3 +136,41 @@ async def test_resilient_client_records_structured_token_usage(
     assert result.answer == "ok"
     after = metrics.llm_tokens_total.labels(provider="openai", token_type="prompt")._value.get()  # noqa: SLF001
     assert after == before + 7
+
+
+@pytest.mark.asyncio
+async def test_resilient_client_accumulates_task_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    accumulated: list[tuple[str, TokenUsage, str]] = []
+
+    async def fake_accumulator(task_id: str, usage: TokenUsage, provider: str) -> None:
+        accumulated.append((task_id, usage, provider))
+
+    register_token_accumulator(fake_accumulator)
+    try:
+        mock_acompletion = AsyncMock(
+            return_value=fake_litellm_response("ok", prompt_tokens=11, completion_tokens=9)
+        )
+        monkeypatch.setattr("llm.litellm_support.litellm.acompletion", mock_acompletion)
+        inner = create_openai_client(
+            api_key="test-key",
+            base_url="https://api.openai.com/v1",
+            model="gpt-4o-mini",
+        )
+        client = ResilientLLMClient(inner, default_timeout=5.0, max_retries=0)
+
+        await client.chat(
+            [ChatMessage(role=ChatRole.USER, content="hello")],
+            task_id="task-accumulate",
+        )
+
+        await asyncio.sleep(0)
+        assert len(accumulated) == 1
+        task_id, usage, provider = accumulated[0]
+        assert task_id == "task-accumulate"
+        assert provider == "openai"
+        assert usage.prompt_tokens == 11
+        assert usage.completion_tokens == 9
+    finally:
+        clear_token_accumulator()

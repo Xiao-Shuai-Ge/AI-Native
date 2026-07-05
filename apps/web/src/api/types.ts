@@ -35,6 +35,31 @@ export type ToolCall = {
   finished_at: string | null;
 };
 
+export type ToolInfo = {
+  name: string;
+  description: string;
+  input_schema: Record<string, unknown>;
+};
+
+export type ToolListResponse = {
+  tools: ToolInfo[];
+};
+
+export type TokenUsageSummary = {
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  status: "known" | "partial" | "unknown";
+};
+
+export type TaskMetrics = {
+  tool_calls_total: number;
+  tool_calls_succeeded: number;
+  tool_calls_failed: number;
+  token_usage: TokenUsageSummary;
+  trace_id: string | null;
+};
+
 export type TaskSummary = {
   task_id: string;
   session_id: string | null;
@@ -55,6 +80,7 @@ export type TaskDetail = TaskSummary & {
   steps: TaskStep[];
   audit_events: AuditEvent[];
   tool_calls: ToolCall[];
+  metrics: TaskMetrics;
   messages: Array<{ id: string; role: string; content: string; created_at: string }>;
   runtime_state: Record<string, unknown> | null;
   user_preferences: Record<string, unknown> | null;

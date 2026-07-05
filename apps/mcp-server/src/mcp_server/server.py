@@ -23,7 +23,7 @@ from mcp_server.errors import ToolError
 from mcp_server.tools.calculator import CalculatorInput, run_calculator
 from mcp_server.tools.code_runner import CodeRunnerInput, DockerSandboxRunner, run_code
 from mcp_server.tools.readonly_sql import ReadonlySqlInput, run_query
-from mcp_server.tools.web_search import WebSearchInput, search
+from mcp_server.tools.web_search import MAX_RESULTS, WebSearchInput, search
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,10 @@ def _tool_error_payload(error: ToolError) -> dict[str, Any]:
     return {"error_code": error.code.value, "error_message": error.message}
 
 
+def _bounded_web_search_limit(value: int) -> int:
+    return min(max(value, 1), MAX_RESULTS)
+
+
 def create_mcp_server(settings: Settings | None = None) -> FastMCP:
     resolved_settings = settings or get_settings()
     state = ServerState(resolved_settings)
@@ -103,7 +107,10 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
     )
     async def web_search(query: str, max_results: int = 5) -> dict[str, Any]:
         try:
-            payload = WebSearchInput(query=query, max_results=max_results)
+            payload = WebSearchInput(
+                query=query,
+                max_results=_bounded_web_search_limit(max_results),
+            )
             result = await search(
                 payload,
                 http_client=state.get_http_client(),

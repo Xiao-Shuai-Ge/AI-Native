@@ -1,6 +1,6 @@
 # AI Native 多智能体协作平台
 
-Day 7 交付：MCP Server（`calculator`/`web_search`/`code_runner`/`readonly_sql` 四个工具）、`GET /api/tools` 动态发现、LangGraph 与 CrewAI 两个引擎共用的 ReAct 工具调用循环（researcher/analyst 角色按 allowlist 自主决定是否调用工具）。
+Day 9 交付：Web 详情页展示 MCP 工具目录（`GET /api/tools`）、任务级 Token/工具指标（API 聚合字段）、Jaeger/Prometheus 跳转链接；SSE 断线有限重连与轮询降级边界修复；Vitest 端到端流程测试。
 
 Day 5～6 交付：Web 控制台（新建任务、详情 SSE/轮询、历史、设置）、`GET/PUT /api/settings`、`GET /api/tasks/{id}/events` SSE。
 
@@ -334,6 +334,27 @@ tool_calls_total{engine="langgraph",status="success"}
 ```
 
 **日志关联**：结构化 JSON 日志包含 `trace_id` 与 `task_id`，可与 Jaeger trace 和审计事件关联。本地测试默认 `OTEL_EXPORTER_OTLP_ENDPOINT=none` 禁用 OTLP 导出。
+
+**Web 详情页（Day 9）**：
+
+- **可用 MCP 工具**：详情页加载 `GET /api/tools`，展示动态发现的工具名与描述。
+- **任务指标**：`GET /api/tasks/{id}` 返回 `metrics` 字段，含工具调用统计与 per-task Token 累加（Worker 写入 Dapr `runtime_state.token_usage`）。
+- **可观测性链接**：若审计事件含 `trace_id`，详情页提供 Jaeger Trace 链接；并提供 Prometheus 预填查询入口。
+- **SSE 降级**：SSE 断线最多重连 3 次，失败后自动降级为 2s 轮询 `GET /api/tasks/{id}`。
+
+Web 可选环境变量（见 `apps/web/.env.example`）：
+
+| 变量 | 说明 |
+|------|------|
+| `VITE_JAEGER_URL` | Jaeger UI 基址，默认 `http://localhost:16686` |
+| `VITE_PROMETHEUS_URL` | Prometheus UI 基址，默认 `http://localhost:9090` |
+
+**演示步骤**：
+
+1. 创建并执行一条任务，打开任务详情页。
+2. 在「任务指标」区块查看 Token 与工具调用统计；点击 Jaeger 链接（需任务已产生带 `trace_id` 的审计事件）。
+3. 在 Jaeger 中按 `task_id` 属性过滤，对照 Prometheus 中 `llm_tokens_total` / `tool_calls_total`（按 `engine` 标签）。
+4. 可选：断开 SSE（如重启 API）观察「轮询降级」提示与状态仍可通过刷新恢复。
 
 ## 质量检查
 

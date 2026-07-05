@@ -10,6 +10,7 @@ from api.config import Settings
 from events.broadcaster import TaskEventBroadcaster
 from events.handler import AgentTaskEventHandler
 from events.schemas import AgentTaskEventPublisher
+from observability.task_tokens import clear_token_accumulator, register_dapr_token_accumulator
 from persistence.dapr_client import DaprHttpClient
 from persistence.dapr_state import DaprStateStore
 from persistence.database import create_engine, create_session_factory
@@ -35,13 +36,15 @@ def build_app_state(settings: Settings) -> AppState:
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
     dapr_client = DaprHttpClient(http_port=settings.dapr_http_port)
+    dapr_state = DaprStateStore(dapr_client)
+    register_dapr_token_accumulator(dapr_state)
     event_broadcaster = TaskEventBroadcaster()
     return AppState(
         settings=settings,
         engine=engine,
         session_factory=session_factory,
         dapr_client=dapr_client,
-        dapr_state=DaprStateStore(dapr_client),
+        dapr_state=dapr_state,
         session_store=SessionStore.from_settings(settings),
         event_publisher=AgentTaskEventPublisher(dapr_client),
         event_handler=AgentTaskEventHandler(
@@ -57,6 +60,7 @@ def build_app_state(settings: Settings) -> AppState:
 
 
 async def shutdown_app_state(state: AppState) -> None:
+    clear_token_accumulator()
     state.workflow_scheduler.close()
     await state.dapr_client.aclose()
     await state.session_store.aclose()

@@ -2,9 +2,12 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { pauseTask, resumeTask } from "../api/tasks";
+import { AvailableToolsPanel } from "../components/AvailableToolsPanel";
+import { ObservabilityLinks } from "../components/ObservabilityLinks";
 import { ReportViewer } from "../components/ReportViewer";
 import { StatusBadge } from "../components/StatusBadge";
 import { StepTimeline } from "../components/StepTimeline";
+import { TaskMetricsPanel } from "../components/TaskMetricsPanel";
 import { ToolCallsPanel } from "../components/ToolCallsPanel";
 import { useTaskEvents } from "../hooks/useTaskEvents";
 
@@ -134,6 +137,21 @@ export function TaskDetailPage() {
         <h3 className="text-lg font-medium">Agent 时间线</h3>
         <div className="mt-4">
           <StepTimeline events={auditEvents} />
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+        <h3 className="text-lg font-medium">可用 MCP 工具</h3>
+        <div className="mt-4">
+          <AvailableToolsPanel />
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
+        <h3 className="text-lg font-medium">任务指标</h3>
+        <div className="mt-4">
+          <TaskMetricsPanel metrics={task.metrics} engine={task.engine_selected} />
+          <ObservabilityLinks metrics={task.metrics} engine={task.engine_selected} />
         </div>
       </div>
 

@@ -13,7 +13,7 @@ type UseTaskEventsResult = {
   loading: boolean;
   error: string | null;
   connectionMode: "sse" | "polling" | "idle";
-  refresh: () => Promise<void>;
+  refresh: () => Promise<TaskDetail | null>;
 };
 
 function mergeAuditEvents(existing: AuditEvent[], incoming: AuditEvent[]): AuditEvent[] {
@@ -49,11 +49,12 @@ export function useTaskEvents(taskId: string | undefined): UseTaskEventsResult {
 
   const refresh = useCallback(async () => {
     if (!taskId) {
-      return;
+      return null;
     }
     const detail = await getTask(taskId);
     setTask(detail);
     setAuditEvents(detail.audit_events);
+    return detail;
   }, [taskId]);
 
   const stopPolling = useCallback(() => {
@@ -68,6 +69,9 @@ export function useTaskEvents(taskId: string | undefined): UseTaskEventsResult {
       return;
     }
     setConnectionMode("polling");
+    void refresh().catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : "poll failed");
+    });
     pollTimer.current = window.setInterval(() => {
       void refresh().catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "poll failed");
@@ -82,6 +86,7 @@ export function useTaskEvents(taskId: string | undefined): UseTaskEventsResult {
 
     let cancelled = false;
     let closedGracefully = false;
+    let reconnecting = false;
     let eventSource: EventSource | null = null;
 
     const load = async () => {
@@ -109,11 +114,13 @@ export function useTaskEvents(taskId: string | undefined): UseTaskEventsResult {
           eventSource = new EventSource(taskEventsUrl(taskId));
 
           eventSource.addEventListener("snapshot", (message) => {
+            reconnectCount.current = 0;
             const data = JSON.parse(message.data) as TaskEventSnapshot;
             setAuditEvents(data.audit_events);
           });
 
           eventSource.addEventListener("task_event", (message) => {
+            reconnectCount.current = 0;
             const data = JSON.parse(message.data) as TaskSseEvent;
             setAuditEvents((prev) => mergeAuditEvents(prev, [sseEventToAudit(data)]));
             void refresh().catch(() => undefined);
@@ -127,16 +134,47 @@ export function useTaskEvents(taskId: string | undefined): UseTaskEventsResult {
           });
 
           eventSource.onerror = () => {
-            if (closedGracefully || cancelled) {
+            if (closedGracefully || cancelled || reconnecting) {
               return;
             }
-            eventSource?.close();
-            reconnectCount.current += 1;
-            if (reconnectCount.current <= MAX_SSE_RECONNECTS) {
-              window.setTimeout(connectSse, 1000);
-              return;
+            reconnecting = true;
+            const source = eventSource;
+            source?.close();
+            if (eventSource === source) {
+              eventSource = null;
             }
-            startPolling();
+            if (source) {
+              source.onerror = null;
+            }
+
+            void (async () => {
+              try {
+                const latest = await refresh();
+                if (cancelled) {
+                  return;
+                }
+                if (latest && TERMINAL.includes(latest.status)) {
+                  closedGracefully = true;
+                  setConnectionMode("idle");
+                  return;
+                }
+              } catch {
+                // fall through to reconnect logic
+              }
+
+              if (cancelled || closedGracefully) {
+                return;
+              }
+
+              reconnectCount.current += 1;
+              if (reconnectCount.current <= MAX_SSE_RECONNECTS) {
+                window.setTimeout(connectSse, 1000);
+                return;
+              }
+              startPolling();
+            })().finally(() => {
+              reconnecting = false;
+            });
           };
         };
 

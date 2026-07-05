@@ -17,6 +17,7 @@ from llm.openai_compatible import OpenAICompatibleClient
 from llm.protocol import ChatMessage, ChatResponse, LLMProviderInfo, TokenUsage, ToolDefinition
 from observability import metrics
 from observability.context import get_task_id
+from observability.task_tokens import accumulate_task_tokens
 from observability.tracing import start_span
 
 logger = logging.getLogger(__name__)
@@ -172,6 +173,8 @@ class ResilientLLMClient:
                     duration_seconds=duration_seconds,
                 )
                 metrics.record_llm_tokens(provider=provider, usage=usage)
+                if effective_task_id is not None:
+                    accumulate_task_tokens(effective_task_id, usage, provider)
                 return result
 
         assert last_error is not None
