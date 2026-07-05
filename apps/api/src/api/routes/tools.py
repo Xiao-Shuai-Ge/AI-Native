@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from api.config import Settings, get_settings
 from mcp_client.errors import MCPToolError
 from mcp_client.factory import create_mcp_client
+from observability.tracing import inject_trace_headers
 
 router = APIRouter(prefix="/api", tags=["tools"])
 
@@ -28,7 +29,7 @@ class ToolListResponse(BaseModel):
 async def list_tools(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> ToolListResponse:
-    client = create_mcp_client(settings)
+    client = create_mcp_client(settings, trace_headers=inject_trace_headers())
     try:
         discovered = await client.discover_tools()
     except MCPToolError as exc:

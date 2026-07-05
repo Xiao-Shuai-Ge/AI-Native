@@ -24,6 +24,8 @@ async def test_metrics_returns_prometheus_text(client: AsyncClient) -> None:
     response = await client.get("/metrics")
     assert response.status_code == 200
     assert "api_up" in response.text
+    assert "task_completions_total" in response.text
+    assert "llm_tokens_total" in response.text
 
 
 @pytest.mark.integration

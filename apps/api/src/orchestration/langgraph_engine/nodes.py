@@ -26,6 +26,7 @@ from orchestration.langgraph_engine.state import (
     STEP_WRITER,
     GraphState,
 )
+from observability.activity import log_behavior
 
 _DEFAULT_ROLE_SUBSET = ("writer",)
 
@@ -36,6 +37,13 @@ async def plan_node(state: GraphState, *, llm: LLMClient) -> dict[str, Any]:
         state["user_query"],
         task_id=UUID(state["task_id"]),
         llm=llm,
+    )
+    log_behavior(
+        "plan.summary",
+        task_id=state.get("task_id"),
+        assigned_roles=plan_output.assigned_roles,
+        subtask_count=len(plan_output.subtasks),
+        subtasks=plan_output.subtasks,
     )
     return {
         "plan": plan_output.subtasks,

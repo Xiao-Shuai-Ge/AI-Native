@@ -8,12 +8,18 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from litellm.exceptions import AuthenticationError, RateLimitError
+from pydantic import BaseModel
 from tests.llm_helpers import fake_litellm_response
 
 from llm.adapters.openai_adapter import create_openai_client
 from llm.errors import LLMConfigurationError, LLMTimeoutError
 from llm.protocol import ChatMessage, ChatRole
 from llm.resilient import ResilientLLMClient
+from observability import metrics
+
+
+class _SampleStructuredOutput(BaseModel):
+    answer: str
 
 
 @pytest.mark.asyncio
@@ -98,3 +104,34 @@ async def test_resilient_client_does_not_retry_on_authentication_error(
         await client.chat([ChatMessage(role=ChatRole.USER, content="hello")])
 
     assert attempts["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_resilient_client_records_structured_token_usage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mock_acompletion = AsyncMock(
+        return_value=fake_litellm_response(
+            '{"answer":"ok"}',
+            prompt_tokens=7,
+            completion_tokens=3,
+        )
+    )
+    monkeypatch.setattr("llm.litellm_support.litellm.acompletion", mock_acompletion)
+    inner = create_openai_client(
+        api_key="test-key",
+        base_url="https://api.openai.com/v1",
+        model="gpt-4o-mini",
+    )
+    client = ResilientLLMClient(inner, default_timeout=5.0, max_retries=0)
+    before = metrics.llm_tokens_total.labels(provider="openai", token_type="prompt")._value.get()  # noqa: SLF001
+
+    result = await client.chat_structured(
+        [ChatMessage(role=ChatRole.USER, content="hello")],
+        _SampleStructuredOutput,
+        task_id="task-structured",
+    )
+
+    assert result.answer == "ok"
+    after = metrics.llm_tokens_total.labels(provider="openai", token_type="prompt")._value.get()  # noqa: SLF001
+    assert after == before + 7

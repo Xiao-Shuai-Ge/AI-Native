@@ -42,10 +42,23 @@ from orchestration.langgraph_engine.state import (
     GraphState,
     to_task_state,
 )
+from observability.tracing import start_span
 
 logger = logging.getLogger(__name__)
 
 NodeFn = Callable[[GraphState], Awaitable[dict[str, Any]]]
+
+
+def _with_span(step_name: str, node_fn: NodeFn) -> NodeFn:
+    @functools.wraps(node_fn)
+    async def _wrapped(state: GraphState) -> dict[str, Any]:
+        with start_span(
+            f"langgraph.node.{step_name}",
+            attributes={"task_id": state.get("task_id"), "step": step_name},
+        ):
+            return await node_fn(state)
+
+    return _wrapped
 
 
 def _with_event(
@@ -103,13 +116,20 @@ def build_graph(
     # cleanly; the runtime accepts any `Callable[[GraphState], Awaitable[dict]]`.
     graph.add_node(  # type: ignore[call-overload]
         STEP_PLAN,
-        _with_event(STEP_PLAN, functools.partial(plan_node, llm=llm), on_node_complete),
+        _with_event(
+            STEP_PLAN,
+            _with_span(STEP_PLAN, functools.partial(plan_node, llm=llm)),
+            on_node_complete,
+        ),
     )
     graph.add_node(  # type: ignore[call-overload]
         STEP_SELECT_ROLES,
         _with_event(
             STEP_SELECT_ROLES,
-            functools.partial(select_roles_node, role_registry=registry),
+            _with_span(
+                STEP_SELECT_ROLES,
+                functools.partial(select_roles_node, role_registry=registry),
+            ),
             on_node_complete,
         ),
     )
@@ -117,8 +137,11 @@ def build_graph(
         STEP_RESEARCHER,
         _with_event(
             STEP_RESEARCHER,
-            functools.partial(
-                researcher_node, llm=llm, role_registry=registry, mcp_client=mcp_client
+            _with_span(
+                STEP_RESEARCHER,
+                functools.partial(
+                    researcher_node, llm=llm, role_registry=registry, mcp_client=mcp_client
+                ),
             ),
             on_node_complete,
         ),
@@ -127,7 +150,12 @@ def build_graph(
         STEP_ANALYST,
         _with_event(
             STEP_ANALYST,
-            functools.partial(analyst_node, llm=llm, role_registry=registry, mcp_client=mcp_client),
+            _with_span(
+                STEP_ANALYST,
+                functools.partial(
+                    analyst_node, llm=llm, role_registry=registry, mcp_client=mcp_client
+                ),
+            ),
             on_node_complete,
         ),
     )
@@ -135,7 +163,10 @@ def build_graph(
         STEP_WRITER,
         _with_event(
             STEP_WRITER,
-            functools.partial(writer_node, llm=llm, role_registry=registry),
+            _with_span(
+                STEP_WRITER,
+                functools.partial(writer_node, llm=llm, role_registry=registry),
+            ),
             on_node_complete,
         ),
     )
@@ -153,7 +184,11 @@ def build_graph(
 
     graph.add_node(  # type: ignore[call-overload]
         STEP_PERSIST_RESULT,
-        _with_event(STEP_PERSIST_RESULT, persist_result_node, on_node_complete),
+        _with_event(
+            STEP_PERSIST_RESULT,
+            _with_span(STEP_PERSIST_RESULT, persist_result_node),
+            on_node_complete,
+        ),
     )
 
     graph.add_edge(START, STEP_PLAN)

@@ -83,6 +83,8 @@ services:
       MCP_SERVER_URL: http://mcp-server:8001
       MCP_SERVICE_INVOCATION_APP_ID: mcp-server
       MCP_USE_DAPR_INVOCATION: ${MCP_USE_DAPR_INVOCATION:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_SERVICE_NAME: api
     depends_on:
       redis:
         condition: service_healthy
@@ -208,6 +210,8 @@ services:
       context: .
       dockerfile: infra/docker/Dockerfile.api
     command: ["/app/infra/docker/docker-entrypoint-worker.sh"]
+    ports:
+      - "${WORKER_METRICS_PORT:-8002}:8002"
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -226,6 +230,9 @@ services:
       MCP_SERVER_URL: http://mcp-server:8001
       MCP_SERVICE_INVOCATION_APP_ID: mcp-server
       MCP_USE_DAPR_INVOCATION: ${MCP_USE_DAPR_INVOCATION:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_SERVICE_NAME: worker
+      WORKER_METRICS_PORT: 8002
     volumes:
       - ./dapr/components:/dapr/components:ro
       - ./dapr/config:/dapr/config:ro

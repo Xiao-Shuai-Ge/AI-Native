@@ -25,6 +25,7 @@ from llm.protocol import ChatMessage, ChatRole, LLMClient, ToolDefinition
 from mcp_client.client import MCPClient
 from mcp_client.errors import MCPToolError, MCPToolErrorCode
 from mcp_client.schema import filter_by_allowlist, to_tool_definition
+from observability.activity import log_behavior
 from orchestration.models import ToolCallRecord
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,13 @@ async def run_tool_loop(
                 )
             )
             for call in response.tool_calls:
+                args_summary = json.dumps(call.arguments, ensure_ascii=False)[:500]
+                log_behavior(
+                    "tool.selected",
+                    task_id=task_id,
+                    tool=call.name,
+                    arguments_summary=args_summary,
+                )
                 record = ToolCallRecord(
                     tool_name=call.name,
                     arguments=call.arguments,
@@ -147,6 +155,12 @@ async def run_tool_loop(
                         )
                         result_text = json.dumps(result, ensure_ascii=False)
                         record.result_summary = result_text[:MAX_TOOL_RESULT_SUMMARY_CHARS]
+                        log_behavior(
+                            "tool.observation",
+                            task_id=task_id,
+                            tool=call.name,
+                            result_summary=record.result_summary,
+                        )
                     except MCPToolError as exc:
                         result_text = json.dumps(
                             {"error_code": exc.code.value, "error_message": exc.message}

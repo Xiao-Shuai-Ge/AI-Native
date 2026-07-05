@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     api_host: str = Field(default="0.0.0.0", alias="API_HOST")
     api_port: int = Field(default=8000, alias="API_PORT")
+    worker_metrics_port: int = Field(default=8002, alias="WORKER_METRICS_PORT")
 
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT")
@@ -44,7 +45,7 @@ class Settings(BaseSettings):
     mcp_use_dapr_invocation: bool = Field(default=True, alias="MCP_USE_DAPR_INVOCATION")
 
     otel_exporter_otlp_endpoint: str = Field(
-        default="http://localhost:4317",
+        default="none",
         alias="OTEL_EXPORTER_OTLP_ENDPOINT",
     )
 

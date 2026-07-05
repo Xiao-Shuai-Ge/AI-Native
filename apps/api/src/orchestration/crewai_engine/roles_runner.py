@@ -32,6 +32,7 @@ from orchestration.crewai_engine.builders import build_agent, build_task
 from orchestration.crewai_engine.llm_bridge import CrewAILLMBridge
 from orchestration.crewai_engine.parsing import parse_structured_output
 from orchestration.models import ToolCallRecord
+from observability.tracing import start_span
 
 _STRUCTURED_JSON_PROMPT = (
     "Now produce your final answer as the required structured JSON."
@@ -119,19 +120,23 @@ async def run_researcher(
     role: RoleConfig | None = None,
     mcp_client: MCPClient | None = None,
 ) -> tuple[ResearcherNotes, list[ToolCallRecord]]:
-    role_config = role or RESEARCHER_ROLE
-    description = f"User query: {user_query}"
-    if subtask:
-        description += f"\nSubtask: {subtask}"
-    raw, tool_calls = await _run_single_task_crew(
-        role=role_config,
-        description_body=description,
-        schema=ResearcherNotes,
-        llm=llm,
-        task_id=task_id,
-        mcp_client=mcp_client,
-    )
-    return parse_structured_output(raw, ResearcherNotes), tool_calls
+    with start_span(
+        "crewai.task.researcher",
+        attributes={"task_id": str(task_id), "step": "researcher"},
+    ):
+        role_config = role or RESEARCHER_ROLE
+        description = f"User query: {user_query}"
+        if subtask:
+            description += f"\nSubtask: {subtask}"
+        raw, tool_calls = await _run_single_task_crew(
+            role=role_config,
+            description_body=description,
+            schema=ResearcherNotes,
+            llm=llm,
+            task_id=task_id,
+            mcp_client=mcp_client,
+        )
+        return parse_structured_output(raw, ResearcherNotes), tool_calls
 
 
 async def run_analyst(
@@ -144,20 +149,24 @@ async def run_analyst(
     role: RoleConfig | None = None,
     mcp_client: MCPClient | None = None,
 ) -> tuple[AnalystSummary, list[ToolCallRecord]]:
-    role_config = role or ANALYST_ROLE
-    notes_block = "\n".join(f"- {note}" for note in research_notes) or "(no research notes)"
-    description = f"User query: {user_query}\nResearch notes:\n{notes_block}"
-    if subtask:
-        description += f"\nSubtask: {subtask}"
-    raw, tool_calls = await _run_single_task_crew(
-        role=role_config,
-        description_body=description,
-        schema=AnalystSummary,
-        llm=llm,
-        task_id=task_id,
-        mcp_client=mcp_client,
-    )
-    return parse_structured_output(raw, AnalystSummary), tool_calls
+    with start_span(
+        "crewai.task.analyst",
+        attributes={"task_id": str(task_id), "step": "analyst"},
+    ):
+        role_config = role or ANALYST_ROLE
+        notes_block = "\n".join(f"- {note}" for note in research_notes) or "(no research notes)"
+        description = f"User query: {user_query}\nResearch notes:\n{notes_block}"
+        if subtask:
+            description += f"\nSubtask: {subtask}"
+        raw, tool_calls = await _run_single_task_crew(
+            role=role_config,
+            description_body=description,
+            schema=AnalystSummary,
+            llm=llm,
+            task_id=task_id,
+            mcp_client=mcp_client,
+        )
+        return parse_structured_output(raw, AnalystSummary), tool_calls
 
 
 async def run_writer(
@@ -170,19 +179,23 @@ async def run_writer(
     subtask: str | None = None,
     role: RoleConfig | None = None,
 ) -> WriterSummary:
-    role_config = role or WRITER_ROLE
-    notes_block = "\n".join(f"- {note}" for note in research_notes) or "(no research notes)"
-    description = (
-        f"User query: {user_query}\nResearch notes:\n{notes_block}\n"
-        f"Analysis:\n{analysis or '(no analysis)'}"
-    )
-    if subtask:
-        description += f"\nSubtask: {subtask}"
-    raw, _tool_calls = await _run_single_task_crew(
-        role=role_config,
-        description_body=description,
-        schema=WriterSummary,
-        llm=llm,
-        task_id=task_id,
-    )
-    return parse_structured_output(raw, WriterSummary)
+    with start_span(
+        "crewai.task.writer",
+        attributes={"task_id": str(task_id), "step": "writer"},
+    ):
+        role_config = role or WRITER_ROLE
+        notes_block = "\n".join(f"- {note}" for note in research_notes) or "(no research notes)"
+        description = (
+            f"User query: {user_query}\nResearch notes:\n{notes_block}\n"
+            f"Analysis:\n{analysis or '(no analysis)'}"
+        )
+        if subtask:
+            description += f"\nSubtask: {subtask}"
+        raw, _tool_calls = await _run_single_task_crew(
+            role=role_config,
+            description_body=description,
+            schema=WriterSummary,
+            llm=llm,
+            task_id=task_id,
+        )
+        return parse_structured_output(raw, WriterSummary)

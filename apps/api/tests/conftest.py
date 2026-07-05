@@ -1,9 +1,12 @@
 """Pytest configuration for API tests."""
 
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "none")
 
 API_SRC = Path(__file__).resolve().parents[1] / "src"
 if str(API_SRC) not in sys.path:

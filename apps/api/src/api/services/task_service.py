@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from events.schemas import AgentTaskEvent, AgentTaskEventPublisher
 from orchestration.models import TaskRequest, TaskStatus
+from observability.context import bind_task_context
+from observability.tracing import inject_trace_headers, start_span
 from persistence.dapr_state import DaprStateStore
 from persistence.ids import new_task_id, thread_id_for, workflow_id_for
 from persistence.repository import TaskRepository
@@ -59,6 +61,39 @@ class TaskService:
             else self._default_delay_seconds
         )
 
+        with bind_task_context(
+            task_id=str(task_id),
+            engine=request.engine.value,
+            workflow_id=workflow_id,
+        ), start_span(
+            "task.create",
+            attributes={
+                "task_id": str(task_id),
+                "engine": request.engine.value,
+                "workflow_id": workflow_id,
+            },
+        ):
+            return await self._create_task_impl(
+                request=request,
+                task_id=task_id,
+                session_id=session_id,
+                user_id=user_id,
+                workflow_id=workflow_id,
+                thread_id=thread_id,
+                delay_seconds=delay_seconds,
+            )
+
+    async def _create_task_impl(
+        self,
+        *,
+        request: TaskRequest,
+        task_id: UUID,
+        session_id: UUID,
+        user_id: str,
+        workflow_id: str,
+        thread_id: str,
+        delay_seconds: float,
+    ) -> dict[str, object]:
         async with self._session_factory() as session:
             repo = TaskRepository(session)
             if request.task_id is not None and await repo.task_exists(task_id):
@@ -113,6 +148,7 @@ class TaskService:
             content=request.user_query,
         )
 
+        trace_headers = inject_trace_headers()
         wf_input = TaskWorkflowInput(
             task_id=task_id,
             session_id=session_id,
@@ -124,6 +160,7 @@ class TaskService:
             delay_seconds=delay_seconds,
             user_preferences=preferences,
             session_context=session_context,
+            traceparent=trace_headers.get("traceparent"),
         )
         try:
             await self._workflow_scheduler.schedule_task(wf_input)

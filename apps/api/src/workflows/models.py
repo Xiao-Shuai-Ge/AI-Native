@@ -24,6 +24,7 @@ class TaskWorkflowInput(BaseModel):
     delay_seconds: float = 0.0
     user_preferences: dict[str, object] = Field(default_factory=dict)
     session_context: list[dict[str, object]] = Field(default_factory=list)
+    traceparent: str | None = None
 
 
 class StepActivityInput(BaseModel):

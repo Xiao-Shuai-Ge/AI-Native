@@ -17,6 +17,9 @@ from api.services.settings_service import SettingsService
 from events.schemas import AgentTaskEvent
 from llm.factory import create_llm_client
 from mcp_client.factory import create_mcp_client
+from observability import metrics
+from observability.activity import run_with_activity_observability
+from observability.tracing import current_trace_id, inject_trace_headers
 from orchestration.crewai_engine.roles_runner import run_analyst, run_researcher, run_writer
 from orchestration.engine_router import EngineRouter
 from orchestration.langgraph_engine.engine import LangGraphEngine
@@ -69,6 +72,32 @@ def _activity_result(model: BaseModel) -> dict[str, object]:
     return model.model_dump(mode="json")
 
 
+async def _resolve_traceparent(task_id: UUID, explicit: str | None = None) -> str | None:
+    if explicit:
+        return explicit
+    runtime = get_activity_runtime()
+    state = await runtime.dapr_state.get_task_runtime_state(task_id)
+    if state is None:
+        return None
+    traceparent = state.get("traceparent")
+    return traceparent if isinstance(traceparent, str) else None
+
+
+async def _resolve_engine_for_metrics(task_id: UUID) -> str:
+    runtime = get_activity_runtime()
+    try:
+        state = await runtime.dapr_state.get_task_runtime_state(task_id)
+    except Exception:
+        return "unknown"
+    if state is None:
+        return "unknown"
+    for key in ("engine_selected", "engine_requested"):
+        value = state.get(key)
+        if isinstance(value, str) and value and value != "auto":
+            return value
+    return "unknown"
+
+
 async def _publish_event(
     *,
     task_id: UUID,
@@ -85,6 +114,8 @@ async def _publish_event(
         status=status,
         timestamp=datetime.now(tz=UTC),
         detail=detail,
+        trace_id=current_trace_id(),
+        traceparent=inject_trace_headers().get("traceparent"),
     )
     try:
         await runtime.event_publisher.publish(event)
@@ -245,7 +276,18 @@ async def _initialize_task_impl(wf_input: TaskWorkflowInput) -> InitializeTaskRe
         status=TaskStatus.RUNNING.value,
         detail="task started",
     )
+    traceparent = wf_input.traceparent
+    if traceparent is None:
+        traceparent = inject_trace_headers().get("traceparent")
     await _update_runtime_state(task_id, TaskStatus.RUNNING, current_step="plan")
+    runtime_state: dict[str, object] = {
+        "traceparent": traceparent,
+        "started_at": datetime.now(tz=UTC).isoformat(),
+        "engine_requested": engine.value,
+    }
+    if selected is not None:
+        runtime_state["engine_selected"] = selected.value
+    await runtime.dapr_state.merge_task_runtime_state(task_id, runtime_state)
     return InitializeTaskResult()
 
 
@@ -255,7 +297,17 @@ def initialize_task(
 ) -> dict[str, object]:
     parsed = _coerce_input(TaskWorkflowInput, wf_input)
     timeout = ACTIVITY_TIMEOUTS["initialize_task"].total_seconds()
-    result = run_async(asyncio.wait_for(_initialize_task_impl(parsed), timeout=timeout))
+
+    async def _run() -> InitializeTaskResult:
+        return await run_with_activity_observability(
+            activity_name="initialize_task",
+            task_id=parsed.task_id,
+            engine=parsed.engine_requested,
+            traceparent=parsed.traceparent,
+            operation=lambda: _initialize_task_impl(parsed),
+        )
+
+    result = run_async(asyncio.wait_for(_run(), timeout=timeout))
     return _activity_result(result)
 
 
@@ -425,7 +477,10 @@ async def _run_langgraph_graph_impl(step_input: LangGraphStepInput) -> LangGraph
     runtime_settings = await settings_service.get_settings()
     role_registry = settings_service.role_registry_from_settings(runtime_settings)
     llm = create_llm_client(runtime.settings, runtime_llm=runtime_settings.llm)
-    mcp_client = create_mcp_client(runtime.settings)
+    mcp_client = create_mcp_client(
+        runtime.settings,
+        trace_headers=inject_trace_headers(),
+    )
     engine = LangGraphEngine(
         llm=llm,
         checkpointer=checkpointer,
@@ -459,7 +514,18 @@ def run_langgraph_graph(
 ) -> dict[str, object]:
     parsed = _coerce_input(LangGraphStepInput, step_input)
     timeout = ACTIVITY_TIMEOUTS["run_langgraph_graph"].total_seconds()
-    result = run_async(asyncio.wait_for(_run_langgraph_graph_impl(parsed), timeout=timeout))
+
+    async def _run() -> LangGraphStepResult:
+        traceparent = await _resolve_traceparent(parsed.task_id, None)
+        return await run_with_activity_observability(
+            activity_name="run_langgraph_graph",
+            task_id=parsed.task_id,
+            engine=parsed.engine,
+            traceparent=traceparent,
+            operation=lambda: _run_langgraph_graph_impl(parsed),
+        )
+
+    result = run_async(asyncio.wait_for(_run(), timeout=timeout))
     return _activity_result(result)
 
 
@@ -494,6 +560,10 @@ async def _select_engine_impl(step_input: SelectEngineInput) -> SelectEngineResu
         status="completed",
         detail=decision.reason,
     )
+    await runtime.dapr_state.merge_task_runtime_state(
+        task_id,
+        {"engine_selected": decision.engine.value},
+    )
     return SelectEngineResult(
         engine_selected=decision.engine.value,
         reason=decision.reason,
@@ -507,7 +577,18 @@ def select_engine(
 ) -> dict[str, object]:
     parsed = _coerce_input(SelectEngineInput, step_input)
     timeout = ACTIVITY_TIMEOUTS["select_engine"].total_seconds()
-    result = run_async(asyncio.wait_for(_select_engine_impl(parsed), timeout=timeout))
+
+    async def _run() -> SelectEngineResult:
+        traceparent = await _resolve_traceparent(parsed.task_id, None)
+        return await run_with_activity_observability(
+            activity_name="select_engine",
+            task_id=parsed.task_id,
+            engine="auto",
+            traceparent=traceparent,
+            operation=lambda: _select_engine_impl(parsed),
+        )
+
+    result = run_async(asyncio.wait_for(_run(), timeout=timeout))
     return _activity_result(result)
 
 
@@ -533,7 +614,10 @@ async def _run_crewai_researcher_impl(
     runtime_settings = await settings_service.get_settings()
     role_registry = settings_service.role_registry_from_settings(runtime_settings)
     llm = create_llm_client(runtime.settings, runtime_llm=runtime_settings.llm)
-    mcp_client = create_mcp_client(runtime.settings)
+    mcp_client = create_mcp_client(
+        runtime.settings,
+        trace_headers=inject_trace_headers(),
+    )
 
     notes_result, tool_calls = await run_researcher(
         step_input.user_query,
@@ -571,7 +655,18 @@ def run_crewai_researcher(
 ) -> dict[str, object]:
     parsed = _coerce_input(CrewAIResearcherInput, step_input)
     timeout = ACTIVITY_TIMEOUTS["run_crewai_researcher"].total_seconds()
-    result = run_async(asyncio.wait_for(_run_crewai_researcher_impl(parsed), timeout=timeout))
+
+    async def _run() -> CrewAIResearcherResult:
+        traceparent = await _resolve_traceparent(parsed.task_id, None)
+        return await run_with_activity_observability(
+            activity_name="run_crewai_researcher",
+            task_id=parsed.task_id,
+            engine=parsed.engine,
+            traceparent=traceparent,
+            operation=lambda: _run_crewai_researcher_impl(parsed),
+        )
+
+    result = run_async(asyncio.wait_for(_run(), timeout=timeout))
     return _activity_result(result)
 
 
@@ -595,7 +690,10 @@ async def _run_crewai_analyst_impl(step_input: CrewAIAnalystInput) -> CrewAIAnal
     runtime_settings = await settings_service.get_settings()
     role_registry = settings_service.role_registry_from_settings(runtime_settings)
     llm = create_llm_client(runtime.settings, runtime_llm=runtime_settings.llm)
-    mcp_client = create_mcp_client(runtime.settings)
+    mcp_client = create_mcp_client(
+        runtime.settings,
+        trace_headers=inject_trace_headers(),
+    )
 
     analysis_result, tool_calls = await run_analyst(
         step_input.user_query,
@@ -630,7 +728,18 @@ def run_crewai_analyst(
 ) -> dict[str, object]:
     parsed = _coerce_input(CrewAIAnalystInput, step_input)
     timeout = ACTIVITY_TIMEOUTS["run_crewai_analyst"].total_seconds()
-    result = run_async(asyncio.wait_for(_run_crewai_analyst_impl(parsed), timeout=timeout))
+
+    async def _run() -> CrewAIAnalystResult:
+        traceparent = await _resolve_traceparent(parsed.task_id, None)
+        return await run_with_activity_observability(
+            activity_name="run_crewai_analyst",
+            task_id=parsed.task_id,
+            engine=parsed.engine,
+            traceparent=traceparent,
+            operation=lambda: _run_crewai_analyst_impl(parsed),
+        )
+
+    result = run_async(asyncio.wait_for(_run(), timeout=timeout))
     return _activity_result(result)
 
 
@@ -676,7 +785,18 @@ def run_crewai_writer(
 ) -> dict[str, object]:
     parsed = _coerce_input(CrewAIWriterInput, step_input)
     timeout = ACTIVITY_TIMEOUTS["run_crewai_writer"].total_seconds()
-    result = run_async(asyncio.wait_for(_run_crewai_writer_impl(parsed), timeout=timeout))
+
+    async def _run() -> CrewAIWriterResult:
+        traceparent = await _resolve_traceparent(parsed.task_id, None)
+        return await run_with_activity_observability(
+            activity_name="run_crewai_writer",
+            task_id=parsed.task_id,
+            engine=parsed.engine,
+            traceparent=traceparent,
+            operation=lambda: _run_crewai_writer_impl(parsed),
+        )
+
+    result = run_async(asyncio.wait_for(_run(), timeout=timeout))
     return _activity_result(result)
 
 
@@ -730,6 +850,30 @@ def delayed_step(
     return _activity_result(result)
 
 
+async def _record_task_completion_metrics(
+    task_id: UUID,
+    *,
+    engine: str,
+    status: str,
+) -> None:
+    runtime = get_activity_runtime()
+    metrics.record_task_completion(engine=engine, status=status)
+    try:
+        state = await runtime.dapr_state.get_task_runtime_state(task_id)
+    except Exception:
+        return
+    if state is None:
+        return
+    started_at = state.get("started_at")
+    if isinstance(started_at, str):
+        try:
+            started = datetime.fromisoformat(started_at)
+            duration = (datetime.now(tz=UTC) - started).total_seconds()
+            metrics.record_task_duration(engine=engine, duration_seconds=max(duration, 0.0))
+        except ValueError:
+            return
+
+
 async def _finalize_task_impl(finalize_input: FinalizeTaskInput) -> FinalizeTaskResult:
     runtime = get_activity_runtime()
     task_id = finalize_input.task_id
@@ -766,6 +910,7 @@ async def _finalize_task_impl(finalize_input: FinalizeTaskInput) -> FinalizeTask
         current_step="done",
         report=report,
     )
+    await _record_task_completion_metrics(task_id, engine=engine, status=TaskStatus.SUCCEEDED.value)
     return FinalizeTaskResult(report=report)
 
 
@@ -775,7 +920,18 @@ def finalize_task(
 ) -> dict[str, object]:
     parsed = _coerce_input(FinalizeTaskInput, finalize_input)
     timeout = ACTIVITY_TIMEOUTS["finalize_task"].total_seconds()
-    result = run_async(asyncio.wait_for(_finalize_task_impl(parsed), timeout=timeout))
+
+    async def _run() -> FinalizeTaskResult:
+        traceparent = await _resolve_traceparent(parsed.task_id, None)
+        return await run_with_activity_observability(
+            activity_name="finalize_task",
+            task_id=parsed.task_id,
+            engine=parsed.engine,
+            traceparent=traceparent,
+            operation=lambda: _finalize_task_impl(parsed),
+        )
+
+    result = run_async(asyncio.wait_for(_run(), timeout=timeout))
     return _activity_result(result)
 
 
@@ -804,6 +960,12 @@ async def _mark_task_failed_impl(failure_input: TaskFailureInput) -> dict[str, s
         detail=failure_input.error,
     )
     await _update_runtime_state(task_id, TaskStatus.FAILED, current_step="failed")
+    engine = await _resolve_engine_for_metrics(task_id)
+    await _record_task_completion_metrics(
+        task_id,
+        engine=engine,
+        status=TaskStatus.FAILED.value,
+    )
     return {"status": TaskStatus.FAILED.value}
 
 
@@ -813,4 +975,15 @@ def mark_task_failed(
 ) -> dict[str, str]:
     parsed = _coerce_input(TaskFailureInput, failure_input)
     timeout = ACTIVITY_TIMEOUTS["mark_task_failed"].total_seconds()
-    return run_async(asyncio.wait_for(_mark_task_failed_impl(parsed), timeout=timeout))
+
+    async def _run() -> dict[str, str]:
+        traceparent = await _resolve_traceparent(parsed.task_id, None)
+        return await run_with_activity_observability(
+            activity_name="mark_task_failed",
+            task_id=parsed.task_id,
+            engine="unknown",
+            traceparent=traceparent,
+            operation=lambda: _mark_task_failed_impl(parsed),
+        )
+
+    return run_async(asyncio.wait_for(_run(), timeout=timeout))

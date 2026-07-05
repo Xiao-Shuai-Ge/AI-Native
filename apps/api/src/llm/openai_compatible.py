@@ -24,6 +24,7 @@ from llm.protocol import (
     ChatRole,
     LLMCapabilities,
     LLMProviderInfo,
+    TokenUsage,
     ToolDefinition,
 )
 
@@ -56,10 +57,15 @@ class OpenAICompatibleClient:
             model=model,
             capabilities=capabilities,
         )
+        self._last_usage: TokenUsage | None = None
 
     @property
     def provider_info(self) -> LLMProviderInfo:
         return self._provider_info
+
+    @property
+    def last_usage(self) -> TokenUsage | None:
+        return self._last_usage
 
     async def aclose(self) -> None:
         """No-op: litellm manages its own connection pooling internally."""
@@ -80,7 +86,9 @@ class OpenAICompatibleClient:
             tools=tools,
             extra_body=self._extra_body or None,
         )
-        return parse_litellm_response(response, fallback_model=self._model)
+        parsed = parse_litellm_response(response, fallback_model=self._model)
+        self._last_usage = parsed.usage
+        return parsed
 
     async def chat_structured(
         self,
@@ -110,6 +118,7 @@ class OpenAICompatibleClient:
             extra_body={**self._extra_body, "response_format": {"type": "json_object"}},
         )
         parsed = parse_litellm_response(response, fallback_model=self._model)
+        self._last_usage = parsed.usage
         return self._parse_structured_content(parsed.content, schema)
 
     def _parse_structured_content(self, content: str, schema: type[StructuredT]) -> StructuredT:

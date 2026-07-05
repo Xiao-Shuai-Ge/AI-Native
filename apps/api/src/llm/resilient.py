@@ -14,7 +14,10 @@ from pydantic import BaseModel
 from llm.adapters.anthropic import AnthropicClient
 from llm.errors import LLMTimeoutError, LLMUnavailableError
 from llm.openai_compatible import OpenAICompatibleClient
-from llm.protocol import ChatMessage, ChatResponse, LLMProviderInfo, ToolDefinition
+from llm.protocol import ChatMessage, ChatResponse, LLMProviderInfo, TokenUsage, ToolDefinition
+from observability import metrics
+from observability.context import get_task_id
+from observability.tracing import start_span
 
 logger = logging.getLogger(__name__)
 
@@ -90,56 +93,95 @@ class ResilientLLMClient:
         model = self.provider_info.model
         attempts = self._max_retries + 1
         last_error: Exception | None = None
+        effective_task_id = task_id or get_task_id()
 
-        for attempt in range(attempts):
-            started = time.perf_counter()
-            try:
-                result = await asyncio.wait_for(call(), timeout=timeout)
-            except TimeoutError as exc:
-                last_error = LLMTimeoutError(f"LLM {operation} exceeded timeout of {timeout}s")
+        with start_span(
+            "llm.chat",
+            attributes={
+                "task_id": effective_task_id,
+                "provider": provider,
+                "model": model,
+                "operation": operation,
+            },
+        ):
+            for attempt in range(attempts):
+                started = time.perf_counter()
+                try:
+                    result = await asyncio.wait_for(call(), timeout=timeout)
+                except TimeoutError as exc:
+                    last_error = LLMTimeoutError(f"LLM {operation} exceeded timeout of {timeout}s")
+                    duration_ms = int((time.perf_counter() - started) * 1000)
+                    duration_seconds = duration_ms / 1000.0
+                    self._log_call(
+                        task_id=effective_task_id,
+                        provider=provider,
+                        model=model,
+                        duration_ms=duration_ms,
+                        status="error",
+                        error=str(last_error),
+                        attempt=attempt + 1,
+                        usage=None,
+                    )
+                    metrics.record_llm_request(
+                        provider=provider,
+                        status="error",
+                        duration_seconds=duration_seconds,
+                    )
+                    if attempt < attempts - 1 and self._is_retryable(last_error):
+                        continue
+                    raise last_error from exc
+                except Exception as exc:
+                    last_error = exc
+                    duration_ms = int((time.perf_counter() - started) * 1000)
+                    duration_seconds = duration_ms / 1000.0
+                    self._log_call(
+                        task_id=effective_task_id,
+                        provider=provider,
+                        model=model,
+                        duration_ms=duration_ms,
+                        status="error",
+                        error=str(exc),
+                        attempt=attempt + 1,
+                        usage=None,
+                    )
+                    metrics.record_llm_request(
+                        provider=provider,
+                        status="error",
+                        duration_seconds=duration_seconds,
+                    )
+                    if attempt < attempts - 1 and self._is_retryable(exc):
+                        continue
+                    raise
+
                 duration_ms = int((time.perf_counter() - started) * 1000)
+                duration_seconds = duration_ms / 1000.0
+                usage = self._extract_usage(result)
                 self._log_call(
-                    task_id=task_id,
+                    task_id=effective_task_id,
                     provider=provider,
                     model=model,
                     duration_ms=duration_ms,
-                    status="error",
-                    error=str(last_error),
+                    status="success",
+                    error=None,
                     attempt=attempt + 1,
+                    usage=usage,
                 )
-                if attempt < attempts - 1 and self._is_retryable(last_error):
-                    continue
-                raise last_error from exc
-            except Exception as exc:
-                last_error = exc
-                duration_ms = int((time.perf_counter() - started) * 1000)
-                self._log_call(
-                    task_id=task_id,
+                metrics.record_llm_request(
                     provider=provider,
-                    model=model,
-                    duration_ms=duration_ms,
-                    status="error",
-                    error=str(exc),
-                    attempt=attempt + 1,
+                    status="success",
+                    duration_seconds=duration_seconds,
                 )
-                if attempt < attempts - 1 and self._is_retryable(exc):
-                    continue
-                raise
-
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            self._log_call(
-                task_id=task_id,
-                provider=provider,
-                model=model,
-                duration_ms=duration_ms,
-                status="success",
-                error=None,
-                attempt=attempt + 1,
-            )
-            return result
+                metrics.record_llm_tokens(provider=provider, usage=usage)
+                return result
 
         assert last_error is not None
         raise last_error
+
+    def _extract_usage(self, result: R) -> TokenUsage | None:
+        if isinstance(result, ChatResponse):
+            return result.usage
+        last_usage = getattr(self._inner, "last_usage", None)
+        return last_usage if isinstance(last_usage, TokenUsage) else None
 
     @staticmethod
     def _is_retryable(exc: Exception) -> bool:
@@ -164,16 +206,25 @@ class ResilientLLMClient:
         status: str,
         error: str | None,
         attempt: int,
+        usage: TokenUsage | None,
     ) -> None:
-        logger.info(
-            "llm.chat",
-            extra={
-                "task_id": task_id,
-                "provider": provider,
-                "model": model,
-                "duration_ms": duration_ms,
-                "status": status,
-                "error": error,
-                "attempt": attempt,
-            },
-        )
+        extra: dict[str, object] = {
+            "task_id": task_id,
+            "provider": provider,
+            "model": model,
+            "duration_ms": duration_ms,
+            "status": status,
+            "error": error,
+            "attempt": attempt,
+        }
+        if usage is None or (
+            usage.prompt_tokens is None
+            and usage.completion_tokens is None
+            and usage.total_tokens is None
+        ):
+            extra["token_usage"] = "unknown"
+        else:
+            extra["prompt_tokens"] = usage.prompt_tokens
+            extra["completion_tokens"] = usage.completion_tokens
+            extra["total_tokens"] = usage.total_tokens
+        logger.info("llm.chat", extra=extra)

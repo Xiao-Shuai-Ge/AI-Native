@@ -23,6 +23,9 @@ from mcp.types import CallToolResult, TextContent
 
 from mcp_client.errors import MCPToolError, MCPToolErrorCode
 from mcp_client.schema import MCPToolInfo
+from observability import metrics
+from observability.context import get_engine, get_task_id
+from observability.tracing import start_span
 
 logger = logging.getLogger(__name__)
 
@@ -111,13 +114,30 @@ class MCPClient:
         timeout: float | None = None,
         session: ClientSession | None = None,
     ) -> dict[str, Any]:
-        if session is not None:
-            result = await self._invoke_tool(session, name, arguments, timeout=timeout)
-            return _parse_call_tool_result(name, result)
-
-        async with self._session_factory() as owned_session:
-            result = await self._invoke_tool(owned_session, name, arguments, timeout=timeout)
-        return _parse_call_tool_result(name, result)
+        engine = get_engine() or "unknown"
+        task_id = get_task_id()
+        with start_span(
+            "mcp.tool.call",
+            attributes={"task_id": task_id, "engine": engine, "tool": name},
+        ):
+            try:
+                if session is not None:
+                    result = await self._invoke_tool(session, name, arguments, timeout=timeout)
+                    parsed = _parse_call_tool_result(name, result)
+                else:
+                    async with self._session_factory() as owned_session:
+                        result = await self._invoke_tool(
+                            owned_session, name, arguments, timeout=timeout
+                        )
+                    parsed = _parse_call_tool_result(name, result)
+            except MCPToolError:
+                metrics.record_tool_call(engine=engine, status="error")
+                raise
+            except Exception:
+                metrics.record_tool_call(engine=engine, status="error")
+                raise
+            metrics.record_tool_call(engine=engine, status="success")
+            return parsed
 
     async def _invoke_tool(
         self,

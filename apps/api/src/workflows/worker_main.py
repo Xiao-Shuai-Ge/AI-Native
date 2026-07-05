@@ -10,6 +10,8 @@ import threading
 from dapr.ext.workflow import WorkflowRuntime
 
 from api.config import get_settings
+from observability import init_observability
+from observability.metrics_server import start_metrics_server
 from workflows.activities.task_activities import (
     delayed_step,
     execute_step,
@@ -29,10 +31,9 @@ logger = logging.getLogger(__name__)
 
 
 def _configure_logging() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
+    settings = get_settings()
+    init_observability(settings, "worker")
+    start_metrics_server(settings.worker_metrics_port)
 
 
 def build_workflow_runtime() -> WorkflowRuntime:

@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from events.broadcaster import TaskEventBroadcaster
 from events.schemas import AgentTaskEvent
+from observability.context import bind_task_context
+from observability.tracing import attach_trace_context, start_span
 from persistence.idempotency import audit_idempotency_key
 from persistence.repository import TaskRepository
 
@@ -30,27 +32,46 @@ class AgentTaskEventHandler:
             logger.warning("invalid agent task event", extra={"error": str(exc)})
             return False
 
-        idempotency_key = audit_idempotency_key(event.task_id, event.step, event.status)
-        async with self._session_factory() as session:
-            repo = TaskRepository(session)
-            record = await repo.record_audit_event(
-                task_id=event.task_id,
+        with (
+            attach_trace_context(event.traceparent),
+            bind_task_context(
+                task_id=str(event.task_id),
                 engine=event.engine,
-                step=event.step,
-                status=event.status,
-                payload={
-                    "detail": event.detail,
-                    **event.payload,
+            ),
+            start_span(
+                "pubsub.agent_task_event.consume",
+                attributes={
+                    "task_id": str(event.task_id),
+                    "engine": event.engine,
+                    "step": event.step,
+                    "status": event.status,
+                    "trace_id": event.trace_id,
                 },
-                event_time=event.timestamp,
-                idempotency_key=idempotency_key,
-            )
-            await session.commit()
-            created = record is not None
+            ),
+        ):
+            idempotency_key = audit_idempotency_key(event.task_id, event.step, event.status)
+            async with self._session_factory() as session:
+                repo = TaskRepository(session)
+                record = await repo.record_audit_event(
+                    task_id=event.task_id,
+                    engine=event.engine,
+                    step=event.step,
+                    status=event.status,
+                    payload={
+                        "detail": event.detail,
+                        "trace_id": event.trace_id,
+                        "traceparent": event.traceparent,
+                        **event.payload,
+                    },
+                    event_time=event.timestamp,
+                    idempotency_key=idempotency_key,
+                )
+                await session.commit()
+                created = record is not None
 
-        if created and self._broadcaster is not None:
-            await self._broadcaster.publish(event)
-        return created
+            if created and self._broadcaster is not None:
+                await self._broadcaster.publish(event)
+            return created
 
     async def handle_dapr_envelope(self, envelope: dict[str, object]) -> bool:
         data = envelope.get("data")

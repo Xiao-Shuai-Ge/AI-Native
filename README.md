@@ -312,6 +312,29 @@ Server 暂时不可用，researcher/analyst 会记录警告日志并降级为纯
 Compose 网络内所有 Service Invocation），课程范围内可接受；生产化需追加仅允许
 `api`/`worker` 调用 `mcp-server` 的显式策略。
 
+## 可观测性（Jaeger + Prometheus）
+
+API 与 Worker 启动时会初始化 OpenTelemetry（OTLP → Jaeger）与 Prometheus 指标。API 暴露 `GET /metrics`（`:8000`），Worker 暴露 `GET /metrics`（`:8002`，由 `WORKER_METRICS_PORT` 配置）。
+
+**Jaeger 验收**（`http://localhost:16686`）：
+
+- Service 选择 `api` 或 `worker`
+- 创建并执行一条任务后，应能看到 `task.create` → `workflow.activity.*` → `langgraph.node.*` 或 `crewai.task.*` → `llm.chat` → `mcp.tool.call` 等 span
+- 可用 `task_id` 属性过滤
+
+**Prometheus 验收**（`http://localhost:9090`）：
+
+任务执行指标（`task_completions_total`、`llm_tokens_total`、`tool_calls_total` 等）由 Worker 记录，API 仅暴露进程存活指标；Prometheus 同时 scrape `api:8000` 与 `worker:8002`。
+
+```promql
+task_completions_total{engine="langgraph"}
+task_duration_seconds_bucket{engine="crewai"}
+llm_tokens_total{provider="deepseek"}
+tool_calls_total{engine="langgraph",status="success"}
+```
+
+**日志关联**：结构化 JSON 日志包含 `trace_id` 与 `task_id`，可与 Jaeger trace 和审计事件关联。本地测试默认 `OTEL_EXPORTER_OTLP_ENDPOINT=none` 禁用 OTLP 导出。
+
 ## 质量检查
 
 ```powershell
