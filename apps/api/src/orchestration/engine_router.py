@@ -10,13 +10,14 @@ import logging
 
 from pydantic import ValidationError
 
+from agents.messages import USER_QUERY_PREFIX
 from agents.prompts import build_router_system_prompt
 from agents.schemas import EngineRouterDecision
 from llm.errors import LLMError
 from llm.protocol import ChatMessage, ChatRole, LLMClient
-from orchestration.models import EngineChoice
 from observability.activity import log_behavior
 from observability.tracing import start_span
+from orchestration.models import EngineChoice
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class EngineRouter:
         ):
             messages = [
                 ChatMessage(role=ChatRole.SYSTEM, content=build_router_system_prompt()),
-                ChatMessage(role=ChatRole.USER, content=f"User query: {user_query}"),
+                ChatMessage(role=ChatRole.USER, content=f"{USER_QUERY_PREFIX}{user_query}"),
             ]
             try:
                 decision = await llm.chat_structured(
@@ -55,7 +56,7 @@ class EngineRouter:
                 )
                 result = EngineRoutingResult(
                     engine=FALLBACK_ENGINE,
-                    reason=f"fallback: router LLM call failed ({exc})",
+                    reason=f"回退：路由 LLM 调用失败（{exc}）",
                     subtasks={},
                 )
                 log_behavior(

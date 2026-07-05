@@ -1,3 +1,4 @@
+import { formatToolName } from "../lib/labels";
 import type { ToolCall } from "../api/types";
 import { StatusBadge } from "./StatusBadge";
 
@@ -33,7 +34,10 @@ export function ToolCallsPanel({ calls }: ToolCallsPanelProps) {
         return (
           <article key={call.id} className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-sm font-medium text-slate-100">{call.tool_name}</span>
+              <span className="font-mono text-sm font-medium text-slate-100">
+                {formatToolName(call.tool_name)}
+                <span className="ml-2 text-xs font-normal text-slate-500">{call.tool_name}</span>
+              </span>
               <StatusBadge status={call.error ? "failed" : "succeeded"} />
               {duration && <span className="text-xs text-slate-500">{duration}</span>}
             </div>

@@ -5,6 +5,7 @@ import { getSettings, updateSettings } from "../api/settings";
 import { listTasks } from "../api/tasks";
 import type { AgentRoleSettings, RuntimeSettings, TaskSummary } from "../api/types";
 import { StatusBadge } from "../components/StatusBadge";
+import { formatAgentField, formatAgentKey, formatEngine } from "../lib/labels";
 
 const AGENT_KEYS = ["researcher", "analyst", "writer"] as const;
 const LLM_PROVIDERS = ["deepseek", "ollama", "openai", "anthropic", "claude"] as const;
@@ -129,8 +130,8 @@ export function HistorySettingsPage() {
                   <StatusBadge status={task.status} />
                 </div>
                 <p className="mt-2 text-xs text-slate-500">
-                  {task.engine_requested}
-                  {task.engine_selected ? ` → ${task.engine_selected}` : ""} ·{" "}
+                  {formatEngine(task.engine_requested)}
+                  {task.engine_selected ? ` → ${formatEngine(task.engine_selected)}` : ""} ·{" "}
                   {new Date(task.created_at).toLocaleString()}
                 </p>
               </Link>
@@ -145,7 +146,7 @@ export function HistorySettingsPage() {
             <h3 className="text-lg font-medium">模型参数</h3>
             <div className="mt-4 grid gap-4 md:grid-cols-3">
               <label className="space-y-1 text-sm">
-                <span className="text-slate-400">Provider</span>
+                <span className="text-slate-400">模型供应商</span>
                 <select
                   value={settings.llm.provider}
                   onChange={(event) =>
@@ -164,7 +165,7 @@ export function HistorySettingsPage() {
                 </select>
               </label>
               <label className="space-y-1 text-sm">
-                <span className="text-slate-400">Temperature</span>
+                <span className="text-slate-400">温度</span>
                 <input
                   type="number"
                   min={0}
@@ -181,7 +182,7 @@ export function HistorySettingsPage() {
                 />
               </label>
               <label className="space-y-1 text-sm">
-                <span className="text-slate-400">Max Tokens</span>
+                <span className="text-slate-400">最大 Token 数</span>
                 <input
                   type="number"
                   min={1}
@@ -208,11 +209,11 @@ export function HistorySettingsPage() {
                 key={key}
                 className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6"
               >
-                <h3 className="text-lg font-medium capitalize">{key}</h3>
+                <h3 className="text-lg font-medium">{formatAgentKey(key)}</h3>
                 <div className="mt-4 grid gap-3">
                   {(["role", "goal", "backstory", "instructions"] as const).map((field) => (
                     <label key={field} className="space-y-1 text-sm">
-                      <span className="text-slate-400">{field}</span>
+                      <span className="text-slate-400">{formatAgentField(field)}</span>
                       <textarea
                         rows={field === "instructions" ? 3 : 2}
                         value={agent[field]}

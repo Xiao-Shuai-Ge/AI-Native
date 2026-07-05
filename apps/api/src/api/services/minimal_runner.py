@@ -13,6 +13,7 @@ from orchestration.models import EngineChoice, TaskStatus
 from persistence.dapr_state import DaprStateStore
 from persistence.idempotency import step_idempotency_key
 from persistence.repository import TaskRepository
+from workflows.event_messages import step_finished_detail, task_started_detail, task_succeeded_detail
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class MinimalTaskRunner:
                 engine=engine.value,
                 step="task",
                 status=TaskStatus.RUNNING.value,
-                detail="task started",
+                detail=task_started_detail(),
             )
             await self._update_runtime_state(task_id, TaskStatus.RUNNING, current_step="plan")
 
@@ -59,7 +60,7 @@ class MinimalTaskRunner:
                     engine=engine.value,
                     step=step_name,
                     status=step_status,
-                    detail=f"{step_name} finished",
+                    detail=step_finished_detail(step_name),
                 )
                 async with self._session_factory() as session:
                     repo = TaskRepository(session)
@@ -67,7 +68,7 @@ class MinimalTaskRunner:
                         task_id=task_id,
                         step_name=step_name,
                         status=step_status,
-                        output_json={"detail": f"{step_name} stub output"},
+                        output_json={"detail": f"{step_name} 占位输出"},
                         idempotency_key=step_idempotency_key(task_id, step_name),
                     )
                     await session.commit()
@@ -90,7 +91,7 @@ class MinimalTaskRunner:
                 engine=engine.value,
                 step="task",
                 status=TaskStatus.SUCCEEDED.value,
-                detail="task succeeded",
+                detail=task_succeeded_detail(),
             )
             await self._update_runtime_state(
                 task_id,

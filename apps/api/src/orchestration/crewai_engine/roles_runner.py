@@ -21,6 +21,15 @@ from crewai import Crew, Process
 from crewai.crews.crew_output import CrewOutput
 from pydantic import BaseModel
 
+from agents.messages import (
+    ANALYSIS_PREFIX,
+    NO_ANALYSIS,
+    NO_RESEARCH_NOTES,
+    RESEARCH_NOTES_PREFIX,
+    STRUCTURED_JSON_PROMPT,
+    SUBTASK_PREFIX,
+    USER_QUERY_PREFIX,
+)
 from agents.prompts import _role_prompt
 from agents.roles import ANALYST_ROLE, RESEARCHER_ROLE, WRITER_ROLE, RoleConfig
 from agents.schemas import AnalystSummary, ResearcherNotes, WriterSummary
@@ -28,15 +37,13 @@ from agents.tool_loop import resolve_role_tools, run_tool_loop
 from llm.errors import LLMParseError
 from llm.protocol import ChatMessage, ChatRole, LLMClient
 from mcp_client.client import MCPClient
+from observability.tracing import start_span
 from orchestration.crewai_engine.builders import build_agent, build_task
 from orchestration.crewai_engine.llm_bridge import CrewAILLMBridge
 from orchestration.crewai_engine.parsing import parse_structured_output
 from orchestration.models import ToolCallRecord
-from observability.tracing import start_span
 
-_STRUCTURED_JSON_PROMPT = (
-    "Now produce your final answer as the required structured JSON."
-)
+_STRUCTURED_JSON_PROMPT = STRUCTURED_JSON_PROMPT
 
 
 async def _run_single_task_with_tools(
@@ -125,9 +132,9 @@ async def run_researcher(
         attributes={"task_id": str(task_id), "step": "researcher"},
     ):
         role_config = role or RESEARCHER_ROLE
-        description = f"User query: {user_query}"
+        description = f"{USER_QUERY_PREFIX}{user_query}"
         if subtask:
-            description += f"\nSubtask: {subtask}"
+            description += f"\n{SUBTASK_PREFIX}{subtask}"
         raw, tool_calls = await _run_single_task_crew(
             role=role_config,
             description_body=description,
@@ -154,10 +161,10 @@ async def run_analyst(
         attributes={"task_id": str(task_id), "step": "analyst"},
     ):
         role_config = role or ANALYST_ROLE
-        notes_block = "\n".join(f"- {note}" for note in research_notes) or "(no research notes)"
-        description = f"User query: {user_query}\nResearch notes:\n{notes_block}"
+        notes_block = "\n".join(f"- {note}" for note in research_notes) or NO_RESEARCH_NOTES
+        description = f"{USER_QUERY_PREFIX}{user_query}\n{RESEARCH_NOTES_PREFIX}\n{notes_block}"
         if subtask:
-            description += f"\nSubtask: {subtask}"
+            description += f"\n{SUBTASK_PREFIX}{subtask}"
         raw, tool_calls = await _run_single_task_crew(
             role=role_config,
             description_body=description,
@@ -184,13 +191,13 @@ async def run_writer(
         attributes={"task_id": str(task_id), "step": "writer"},
     ):
         role_config = role or WRITER_ROLE
-        notes_block = "\n".join(f"- {note}" for note in research_notes) or "(no research notes)"
+        notes_block = "\n".join(f"- {note}" for note in research_notes) or NO_RESEARCH_NOTES
         description = (
-            f"User query: {user_query}\nResearch notes:\n{notes_block}\n"
-            f"Analysis:\n{analysis or '(no analysis)'}"
+            f"{USER_QUERY_PREFIX}{user_query}\n{RESEARCH_NOTES_PREFIX}\n{notes_block}\n"
+            f"{ANALYSIS_PREFIX}\n{analysis or NO_ANALYSIS}"
         )
         if subtask:
-            description += f"\nSubtask: {subtask}"
+            description += f"\n{SUBTASK_PREFIX}{subtask}"
         raw, _tool_calls = await _run_single_task_crew(
             role=role_config,
             description_body=description,

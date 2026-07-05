@@ -1,0 +1,11 @@
+"""面向模型与用户的简体中文消息模板。"""
+
+STRUCTURED_JSON_PROMPT = "请按要求的结构化 JSON 格式输出最终结果。"
+USER_QUERY_PREFIX = "用户问题："
+SUBTASK_PREFIX = "子任务："
+RESEARCH_NOTES_PREFIX = "研究笔记："
+ANALYSIS_PREFIX = "分析："
+NO_RESEARCH_NOTES = "（暂无研究笔记）"
+NO_ANALYSIS = "（暂无分析）"
+WRITER_TOPIC_PROMPT = "请为主题撰写 Markdown 摘要："
+LANGUAGE_NOTE = "请始终使用简体中文撰写所有输出内容（包括 JSON 字段中的文本）。"

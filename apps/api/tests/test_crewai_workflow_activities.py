@@ -367,4 +367,4 @@ async def test_run_crewai_writer_forwards_subtask_to_role_prompt(
         await _run_crewai_writer_impl(step_input)
 
     assert seen_prompts
-    assert "Subtask: write an executive summary" in seen_prompts[0]
+    assert "子任务：write an executive summary" in seen_prompts[0]

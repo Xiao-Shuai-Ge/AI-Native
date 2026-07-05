@@ -42,7 +42,7 @@ async def test_router_falls_back_to_langgraph_on_invalid_engine_name() -> None:
 
     assert decision.engine == FALLBACK_ENGINE
     assert decision.engine == EngineChoice.LANGGRAPH
-    assert decision.reason.startswith("fallback:")
+    assert decision.reason.startswith("回退：")
 
 
 @pytest.mark.asyncio

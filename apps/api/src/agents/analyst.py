@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from agents.messages import (
+    RESEARCH_NOTES_PREFIX,
+    STRUCTURED_JSON_PROMPT,
+    SUBTASK_PREFIX,
+    USER_QUERY_PREFIX,
+)
 from agents.prompts import build_analyst_system_prompt
 from agents.roles import ANALYST_ROLE, RoleConfig
 from agents.schemas import AnalystSummary
@@ -26,12 +32,12 @@ class AnalystAgent:
         mcp_client: MCPClient | None = None,
         tools: list[ToolDefinition] | None = None,
     ) -> tuple[AnalystSummary, list[ToolCallRecord]]:
-        user_content = f"User query: {user_query}"
+        user_content = f"{USER_QUERY_PREFIX}{user_query}"
         if subtask:
-            user_content += f"\nSubtask: {subtask}"
+            user_content += f"\n{SUBTASK_PREFIX}{subtask}"
         if research_notes:
             joined_notes = "\n".join(f"- {note}" for note in research_notes)
-            user_content += f"\nResearch notes:\n{joined_notes}"
+            user_content += f"\n{RESEARCH_NOTES_PREFIX}\n{joined_notes}"
         role_config = role or ANALYST_ROLE
         messages = [
             ChatMessage(
@@ -54,7 +60,7 @@ class AnalystAgent:
                 *loop_result.messages,
                 ChatMessage(
                     role=ChatRole.USER,
-                    content="Now produce your final answer as the required structured JSON.",
+                    content=STRUCTURED_JSON_PROMPT,
                 ),
             ]
             tool_calls = loop_result.tool_calls

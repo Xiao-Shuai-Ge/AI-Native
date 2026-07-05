@@ -1,4 +1,5 @@
 import type { AuditEvent } from "../api/types";
+import { formatEngine, formatStep } from "../lib/labels";
 import { StatusBadge } from "./StatusBadge";
 
 type StepTimelineProps = {
@@ -16,9 +17,9 @@ export function StepTimeline({ events }: StepTimelineProps) {
         <li key={event.id} className="relative">
           <span className="absolute -left-[1.35rem] top-1.5 h-2 w-2 rounded-full bg-sky-400" />
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-slate-100">{event.step}</span>
+            <span className="font-medium text-slate-100">{formatStep(event.step)}</span>
             <StatusBadge status={event.status} />
-            <span className="text-xs text-slate-500">{event.engine}</span>
+            <span className="text-xs text-slate-500">{formatEngine(event.engine)}</span>
           </div>
           <p className="mt-1 text-xs text-slate-500">
             {new Date(event.event_time).toLocaleString()}

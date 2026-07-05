@@ -33,6 +33,12 @@ from workflows.constraints import (
     ACTIVITY_TIMEOUTS,
     delayed_step_timeout,
 )
+from workflows.event_messages import (
+    langgraph_node_detail,
+    step_finished_detail,
+    task_started_detail,
+    task_succeeded_detail,
+)
 from workflows.models import (
     DELAYED_PROBE_STEP,
     ActivityStepResult,
@@ -222,7 +228,7 @@ async def _commit_crewai_step[TModel: BaseModel](
                     engine=engine,
                     step=step_name,
                     status="completed",
-                    detail=f"{step_name} finished",
+                    detail=step_finished_detail(step_name),
                 )
                 await _update_runtime_state(
                     task_id,
@@ -274,7 +280,7 @@ async def _initialize_task_impl(wf_input: TaskWorkflowInput) -> InitializeTaskRe
         engine=engine.value,
         step="task",
         status=TaskStatus.RUNNING.value,
-        detail="task started",
+        detail=task_started_detail(),
     )
     traceparent = wf_input.traceparent
     if traceparent is None:
@@ -329,7 +335,7 @@ async def _execute_step_impl(step_input: StepActivityInput) -> ActivityStepResul
         engine=step_input.engine,
         step=step_name,
         status=step_input.step_status,
-        detail=f"{step_name} finished",
+        detail=step_finished_detail(step_name),
     )
 
     created = False
@@ -339,7 +345,7 @@ async def _execute_step_impl(step_input: StepActivityInput) -> ActivityStepResul
             task_id=task_id,
             step_name=step_name,
             status=step_input.step_status,
-            output_json={"detail": f"{step_name} stub output"},
+                output_json={"detail": f"{step_name} 占位输出"},
             idempotency_key=idempotency_key,
         )
         await session.commit()
@@ -371,7 +377,7 @@ async def _record_langgraph_node(task_id: UUID, step_name: str, status: str) -> 
                 task_id=task_id,
                 step_name=step_name,
                 status=status,
-                output_json={"detail": f"langgraph node {step_name} {status}"},
+                output_json={"detail": langgraph_node_detail(step_name, status)},
                 idempotency_key=idempotency_key,
             )
             await session.commit()
@@ -449,7 +455,7 @@ async def _run_langgraph_graph_impl(step_input: LangGraphStepInput) -> LangGraph
             engine=step_input.engine,
             step=step_name,
             status=status,
-            detail=f"langgraph node {step_name} {status}",
+            detail=langgraph_node_detail(step_name, status),
         )
         await _record_langgraph_node(task_id, step_name, status)
         await _update_runtime_state(task_id, TaskStatus.RUNNING, current_step=step_name)
@@ -902,7 +908,7 @@ async def _finalize_task_impl(finalize_input: FinalizeTaskInput) -> FinalizeTask
         engine=engine,
         step="task",
         status=TaskStatus.SUCCEEDED.value,
-        detail="task succeeded",
+        detail=task_succeeded_detail(),
     )
     await _update_runtime_state(
         task_id,

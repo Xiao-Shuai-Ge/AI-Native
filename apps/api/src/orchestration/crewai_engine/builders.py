@@ -41,11 +41,11 @@ def build_task(
     schema_hint = json.dumps(schema.model_json_schema(), ensure_ascii=False)
     description = (
         f"{role.instructions}\n\n{description_body}\n\n"
-        "Respond with valid JSON only. Do not include markdown fences or "
-        f"commentary. The JSON must match this schema: {schema_hint}"
+        "请仅返回合法 JSON，不要包含 markdown 代码块或额外说明。"
+        f"JSON 必须符合以下 schema：{schema_hint}"
     )
     return Task(
         description=description,
-        expected_output=f"A JSON object matching schema: {schema.__name__}",
+        expected_output=f"符合 {schema.__name__} schema 的 JSON 对象",
         agent=agent,
     )

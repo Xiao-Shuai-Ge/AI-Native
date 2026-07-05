@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from agents.messages import USER_QUERY_PREFIX
 from agents.prompts import build_planner_system_prompt
 from agents.schemas import PlanOutput
 from llm.protocol import ChatMessage, ChatRole, LLMClient
@@ -23,7 +24,7 @@ class PlannerAgent:
             ChatMessage(role=ChatRole.SYSTEM, content=build_planner_system_prompt()),
             ChatMessage(
                 role=ChatRole.USER,
-                content=f"User query: {user_query}",
+                content=f"{USER_QUERY_PREFIX}{user_query}",
             ),
         ]
         return await llm.chat_structured(

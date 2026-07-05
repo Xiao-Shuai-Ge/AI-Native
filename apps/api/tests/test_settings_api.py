@@ -29,7 +29,7 @@ async def test_get_settings_returns_defaults(client: AsyncClient) -> None:
     assert "llm" in body
     assert "agents" in body
     assert set(body["agents"]) == {"researcher", "analyst", "writer"}
-    assert body["agents"]["writer"]["role"] == "Technical Writer"
+    assert body["agents"]["writer"]["role"] == "技术撰稿人"
 
 
 @pytest.mark.asyncio

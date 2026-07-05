@@ -84,8 +84,9 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
     mcp = FastMCP(
         name="ainative-mcp-server",
         instructions=(
-            "AI Native demo tools: calculator, web_search, code_runner, readonly_sql. "
-            "Only call a tool if it is explicitly needed to answer the current step."
+            "AI Native 演示工具：calculator（计算器）、web_search（网络搜索）、"
+            "code_runner（代码沙箱）、readonly_sql（只读 SQL）。"
+            "仅在当前步骤确实需要时才调用工具。"
         ),
         stateless_http=True,
         lifespan=lifespan,
@@ -93,7 +94,7 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
 
     @mcp.tool(
         name="calculator",
-        description="Evaluate a whitelisted arithmetic expression (no arbitrary code execution).",
+        description="计算白名单内的算术表达式（不执行任意代码）。",
     )
     def calculator(expression: str) -> dict[str, Any]:
         try:
@@ -103,7 +104,7 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
 
     @mcp.tool(
         name="web_search",
-        description="Search the web with Bocha/LangSearch and return up to 5 titles, summaries, and URLs.",
+        description="使用 Bocha/LangSearch 搜索网络，返回最多 5 条标题、摘要与 URL。",
     )
     async def web_search(query: str, max_results: int = 5) -> dict[str, Any]:
         try:
@@ -125,8 +126,8 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
     @mcp.tool(
         name="code_runner",
         description=(
-            "Run a short Python or Shell snippet inside an isolated, network-less sandbox "
-            "container. Use only for small data-processing or calculations."
+            "在隔离、无网络的沙箱容器中运行简短的 Python 或 Shell 代码片段。"
+            "仅用于小型数据处理或计算。"
         ),
     )
     async def code_runner(language: str, code: str, timeout_seconds: float = 5.0) -> dict[str, Any]:
@@ -139,7 +140,7 @@ def create_mcp_server(settings: Settings | None = None) -> FastMCP:
 
     @mcp.tool(
         name="readonly_sql",
-        description="Run a single read-only SELECT query against the demo knowledge base.",
+        description="对演示知识库执行单条只读 SELECT 查询。",
     )
     async def readonly_sql(query: str) -> dict[str, Any]:
         try:

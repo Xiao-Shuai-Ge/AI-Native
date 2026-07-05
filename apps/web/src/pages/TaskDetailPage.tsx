@@ -9,6 +9,7 @@ import { StatusBadge } from "../components/StatusBadge";
 import { StepTimeline } from "../components/StepTimeline";
 import { TaskMetricsPanel } from "../components/TaskMetricsPanel";
 import { ToolCallsPanel } from "../components/ToolCallsPanel";
+import { formatEngine } from "../lib/labels";
 import { useTaskEvents } from "../hooks/useTaskEvents";
 
 export function TaskDetailPage() {
@@ -94,11 +95,11 @@ export function TaskDetailPage() {
           <dl className="mt-3 space-y-2 text-sm">
             <div className="flex justify-between gap-4">
               <dt className="text-slate-500">请求模式</dt>
-              <dd>{task.engine_requested}</dd>
+              <dd>{formatEngine(task.engine_requested)}</dd>
             </div>
             <div className="flex justify-between gap-4">
               <dt className="text-slate-500">实际模式</dt>
-              <dd>{task.engine_selected ?? "待定"}</dd>
+              <dd>{task.engine_selected ? formatEngine(task.engine_selected) : "待定"}</dd>
             </div>
             {task.engine_selection_reason && (
               <div>

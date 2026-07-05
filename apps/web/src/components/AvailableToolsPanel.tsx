@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { listTools } from "../api/tools";
 import type { ToolInfo } from "../api/types";
+import { formatToolName } from "../lib/labels";
 
 export function AvailableToolsPanel() {
   const [tools, setTools] = useState<ToolInfo[]>([]);
@@ -52,7 +53,10 @@ export function AvailableToolsPanel() {
     <div className="grid gap-3 md:grid-cols-2">
       {tools.map((tool) => (
         <article key={tool.name} className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
-          <h4 className="font-mono text-sm font-medium text-slate-100">{tool.name}</h4>
+          <h4 className="font-mono text-sm font-medium text-slate-100">
+            {formatToolName(tool.name)}
+            <span className="ml-2 text-xs font-normal text-slate-500">{tool.name}</span>
+          </h4>
           <p className="mt-2 text-sm text-slate-400">{tool.description || "无描述"}</p>
         </article>
       ))}

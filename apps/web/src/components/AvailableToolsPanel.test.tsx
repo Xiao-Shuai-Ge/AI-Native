@@ -28,7 +28,7 @@ describe("AvailableToolsPanel", () => {
     render(<AvailableToolsPanel />);
 
     await waitFor(() => {
-      expect(screen.getByText("calculator")).toBeInTheDocument();
+      expect(screen.getByText("计算器")).toBeInTheDocument();
       expect(screen.getByText("Safe math")).toBeInTheDocument();
     });
   });

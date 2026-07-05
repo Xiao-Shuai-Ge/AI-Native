@@ -6,6 +6,6 @@ import { StatusBadge } from "./StatusBadge";
 describe("StatusBadge", () => {
   it("renders status text", () => {
     render(<StatusBadge status="running" />);
-    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(screen.getByText("运行中")).toBeInTheDocument();
   });
 });

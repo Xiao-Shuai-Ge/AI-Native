@@ -1,4 +1,5 @@
 import type { TaskStatus } from "../api/types";
+import { formatStatus } from "../lib/labels";
 
 const STATUS_STYLES: Record<TaskStatus, string> = {
   queued: "bg-slate-700 text-slate-200",
@@ -17,7 +18,7 @@ export function StatusBadge({ status }: StatusBadgeProps) {
   const style = STATUS_STYLES[status as TaskStatus] ?? "bg-slate-700 text-slate-200";
   return (
     <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${style}`}>
-      {status}
+      {formatStatus(status)}
     </span>
   );
 }

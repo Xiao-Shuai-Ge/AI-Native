@@ -7,8 +7,8 @@ import type { EngineChoice, LLMProviderInfo } from "../api/types";
 
 const ENGINES: { value: EngineChoice; label: string }[] = [
   { value: "auto", label: "自动选择" },
-  { value: "langgraph", label: "LangGraph" },
-  { value: "crewai", label: "CrewAI" },
+  { value: "langgraph", label: "LangGraph（状态图编排）" },
+  { value: "crewai", label: "CrewAI（角色协作编排）" },
 ];
 
 export function NewTaskPage() {

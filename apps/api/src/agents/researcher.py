@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from agents.messages import STRUCTURED_JSON_PROMPT, SUBTASK_PREFIX, USER_QUERY_PREFIX
 from agents.prompts import build_researcher_system_prompt
 from agents.roles import RESEARCHER_ROLE, RoleConfig
 from agents.schemas import ResearcherNotes
@@ -25,9 +26,9 @@ class ResearcherAgent:
         mcp_client: MCPClient | None = None,
         tools: list[ToolDefinition] | None = None,
     ) -> tuple[ResearcherNotes, list[ToolCallRecord]]:
-        user_content = f"User query: {user_query}"
+        user_content = f"{USER_QUERY_PREFIX}{user_query}"
         if subtask:
-            user_content += f"\nSubtask: {subtask}"
+            user_content += f"\n{SUBTASK_PREFIX}{subtask}"
         role_config = role or RESEARCHER_ROLE
         messages = [
             ChatMessage(
@@ -50,7 +51,7 @@ class ResearcherAgent:
                 *loop_result.messages,
                 ChatMessage(
                     role=ChatRole.USER,
-                    content="Now produce your final answer as the required structured JSON.",
+                    content=STRUCTURED_JSON_PROMPT,
                 ),
             ]
             tool_calls = loop_result.tool_calls

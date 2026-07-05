@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from agents.messages import (
+    ANALYSIS_PREFIX,
+    RESEARCH_NOTES_PREFIX,
+    WRITER_TOPIC_PROMPT,
+)
 from agents.prompts import build_writer_system_prompt
 from agents.roles import WRITER_ROLE, RoleConfig
 from agents.schemas import WriterSummary
@@ -23,12 +28,12 @@ class WriterAgent:
         analysis: str | None = None,
         role: RoleConfig | None = None,
     ) -> WriterSummary:
-        user_content = f"Write a Markdown summary for this topic: {topic}"
+        user_content = f"{WRITER_TOPIC_PROMPT}{topic}"
         if research_notes:
             joined_notes = "\n".join(f"- {note}" for note in research_notes)
-            user_content += f"\nResearch notes:\n{joined_notes}"
+            user_content += f"\n{RESEARCH_NOTES_PREFIX}\n{joined_notes}"
         if analysis:
-            user_content += f"\nAnalysis:\n{analysis}"
+            user_content += f"\n{ANALYSIS_PREFIX}\n{analysis}"
         role_config = role or WRITER_ROLE
         messages = [
             ChatMessage(

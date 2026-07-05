@@ -1,3 +1,4 @@
+import { formatEngine } from "../lib/labels";
 import type { TaskMetrics } from "../api/types";
 
 type TaskMetricsPanelProps = {
@@ -31,20 +32,20 @@ export function TaskMetricsPanel({ metrics, engine }: TaskMetricsPanelProps) {
         </dd>
       </div>
       <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
-        <dt className="text-xs uppercase text-slate-500">Prompt Tokens</dt>
+        <dt className="text-xs uppercase text-slate-500">输入 Token</dt>
         <dd className="mt-1 text-2xl font-semibold text-slate-100">
           {tokenKnown ? formatTokenValue(tokens.prompt_tokens) : "未知"}
         </dd>
       </div>
       <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4">
-        <dt className="text-xs uppercase text-slate-500">Completion Tokens</dt>
+        <dt className="text-xs uppercase text-slate-500">输出 Token</dt>
         <dd className="mt-1 text-2xl font-semibold text-slate-100">
           {tokenKnown ? formatTokenValue(tokens.completion_tokens) : "未知"}
         </dd>
       </div>
       {tokenKnown && tokens.total_tokens !== null && (
         <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4 sm:col-span-2">
-          <dt className="text-xs uppercase text-slate-500">Total Tokens</dt>
+          <dt className="text-xs uppercase text-slate-500">Token 总计</dt>
           <dd className="mt-1 text-2xl font-semibold text-slate-100">
             {formatTokenValue(tokens.total_tokens)}
             {tokens.status === "partial" && (
@@ -56,7 +57,7 @@ export function TaskMetricsPanel({ metrics, engine }: TaskMetricsPanelProps) {
       {engine && (
         <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-4 sm:col-span-2">
           <dt className="text-xs uppercase text-slate-500">引擎</dt>
-          <dd className="mt-1 font-mono text-sm text-slate-300">{engine}</dd>
+          <dd className="mt-1 font-mono text-sm text-slate-300">{formatEngine(engine)}</dd>
         </div>
       )}
     </dl>

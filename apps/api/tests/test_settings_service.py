@@ -50,7 +50,7 @@ async def test_get_settings_falls_back_when_agent_state_is_invalid() -> None:
     ):
         settings = await service.get_settings()
 
-    assert settings.agents["writer"].role == "Technical Writer"
+    assert settings.agents["writer"].role == "技术撰稿人"
 
 
 @pytest.mark.asyncio
@@ -76,4 +76,4 @@ async def test_get_role_registry_returns_runtime_overrides() -> None:
 
     assert registry["writer"].role == "Custom Writer"
     assert registry["writer"].version == "v9"
-    assert registry["researcher"].role == "Researcher"
+    assert registry["researcher"].role == "研究员"
